@@ -34,10 +34,20 @@ async def start_agent():
     # Run ARI client + Media server alongside the pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineTask
-    pipecat_task = PipelineTask(pipeline)
+
+    # Disable idle timeout: we wait for calls, so pipeline has no frames until call connects
+    pipecat_task = PipelineTask(pipeline, idle_timeout_secs=None, cancel_on_idle_timeout=False)
+
+    async def run_transport():
+        try:
+            await transport.run()
+        except Exception as e:
+            logger.exception(f"Transport failed (ARI/Media): {e}")
+            raise
+
     runner = asyncio.create_task(asyncio.gather(
-        transport.run(),
-        PipelineRunner().run(pipecat_task),
+        run_transport(),
+        PipelineRunner(handle_sigint=False, handle_sigterm=False).run(pipecat_task),
     ))
 
     loop = asyncio.get_running_loop()
