@@ -12,5 +12,7 @@ wheels/
 # Environment and secrets
 .env
 
-# Model cache (Whisper, etc.)
+# Model cache (Whisper, Piper, etc.)
 .cache/
+*.onnx
+*.onnx.json

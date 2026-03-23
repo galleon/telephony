@@ -22,7 +22,8 @@ async def start_agent():
     ARI_USER = os.getenv("ARI_USER", "ai_user")
     ARI_PASS = os.getenv("ARI_PASS", "your_password")
 
-    pipeline, transport = configure_bot(MAC_IP, ARI_USER, ARI_PASS)
+    base_url = os.getenv("SPARK_IP") or os.getenv("DGX_IP") or os.getenv("AGENT_HOST")
+    pipeline, transport = configure_bot(MAC_IP, ARI_USER, ARI_PASS, base_url=base_url)
 
     @transport.event_handler("on_client_connected")
     async def on_connect(trans, client):

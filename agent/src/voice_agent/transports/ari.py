@@ -89,6 +89,7 @@ class ARITransport(BaseTransport):
         username: str,
         password: str,
         app_name: str = "ai-assistant",
+        base_url: Optional[str] = None,
         media_host: str = "0.0.0.0",
         media_port: Optional[int] = None,
         params: Optional[TransportParams] = None,
@@ -105,6 +106,7 @@ class ARITransport(BaseTransport):
         self._username = username
         self._password = password
         self._app_name = app_name
+        self._base_url = base_url
         self._media_host = media_host
         self._media_port = media_port or int(os.getenv("ARI_MEDIA_PORT", "8787"))
         self._ari_ws = None
@@ -145,14 +147,21 @@ class ARITransport(BaseTransport):
             ws_channel = str(uuid.uuid4())
             sess["ws_channel"] = ws_channel
             self._sessions[ws_channel] = sess
-            dgx_host = os.getenv("DGX_IP", os.getenv("AGENT_HOST", "localhost"))
-            media_conn = os.getenv("ARI_MEDIA_CONNECTION", "media_connection1")
-            logger.info(f"Creating WebSocket channel for {incoming_name}")
+            external_host = self._base_url
+            if not external_host:
+                external_host = os.getenv("DGX_IP") or os.getenv("AGENT_HOST") or os.getenv("SPARK_IP")
+            if external_host:
+                external_host = external_host.replace("http://", "").replace("https://", "").rstrip("/")
+                if ":" not in external_host:
+                    external_host = f"{external_host}:{self._media_port}"
+            if not external_host:
+                external_host = os.getenv("ARI_MEDIA_CONNECTION", "media_connection1")
+            logger.info(f"Creating WebSocket channel for {incoming_name} (external_host={external_host})")
             await self._ari_send_request("POST", "channels/externalMedia", query_strings=[
                 {"name": "channelId", "value": ws_channel},
                 {"name": "app", "value": msg.get("application", self._app_name)},
                 {"name": "data", "value": "websocket"},
-                {"name": "external_host", "value": media_conn},
+                {"name": "external_host", "value": external_host},
                 {"name": "transport", "value": "websocket"},
                 {"name": "encapsulation", "value": "none"},
                 {"name": "format", "value": "ulaw"},

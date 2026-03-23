@@ -74,7 +74,7 @@ Environment variables in `agent/.env` (on the DGX Spark):
 | `WHISPER_DEVICE` | `cuda` | `cuda` for DGX, `cpu` only for non-GPU testing |
 | `PIPER_USE_CUDA` | `true` | GPU acceleration for TTS on DGX |
 | `PIPER_VOICE` | `en_US-ryan-high` | Piper TTS voice |
-| `DGX_IP` | — | DGX Spark IP (Mac must reach this for ARI Media) |
+| `SPARK_IP` / `DGX_IP` | — | Spark IP so Asterisk sends audio here (e.g. `192.168.1.50`) |
 | `ARI_MEDIA_PORT` | `8787` | Media WebSocket port on DGX |
 
 ### 3. Place a Call
@@ -88,12 +88,6 @@ Using **Linphone** (or Zoiper):
 | Password  | password123                   |
 
 Register, then dial extension **600** to reach the AI assistant.
-
-### Third-party SIP trunk (optional)
-
-To use a provider number (Twilio, VoIP.ms, Telnyx, etc.), add a SIP trunk in `config/pjsip.conf` (uncomment the provider template) and set your credentials. Inbound calls will hit the `from-trunk` context and route to the AI.
-
-**Note:** Asterisk must be reachable from your provider (public IP or tunnel like ngrok). Some providers (e.g. Twilio) use IP-based routing instead of registration—check their SIP docs.
 
 ---
 
