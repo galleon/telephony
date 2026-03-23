@@ -1,0 +1,6 @@
+# Runtime / generated
+logs/
+.env
+agent/.env
+*.pyc
+__pycache__/

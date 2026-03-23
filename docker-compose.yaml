@@ -14,4 +14,5 @@ services:
       - ./config/modules.conf:/etc/asterisk/modules.conf
       - ./config/pjsip.conf:/etc/asterisk/pjsip.conf
       - ./config/websocket_client.conf:/etc/asterisk/websocket_client.conf
+      - ./logs/asterisk/cdr-csv:/var/log/asterisk/cdr-csv
     restart: unless-stopped
