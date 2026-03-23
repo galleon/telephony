@@ -220,20 +220,28 @@ class ARITransport(BaseTransport):
 
     async def _run_ari_client(self):
         ari_url = f"{self._uri.rstrip('/')}/ari/events?subscribeAll=false&app={self._app_name}&api_key={self._username}:{self._password}"
-        logger.info(f"Connecting to ARI at {self._uri}")
-        async with ws_connect(ari_url) as ws:
-            self._ari_ws = ws
-            async for raw in ws:
-                try:
-                    msg = json.loads(raw)
-                    if msg.get("type") == "StasisStart":
-                        await self._on_stasis_start(msg)
-                    elif msg.get("type") == "StasisEnd":
-                        await self._on_stasis_end(msg)
-                    elif msg.get("type") == "Dial":
-                        await self._on_dial(msg)
-                except Exception as e:
-                    logger.error(f"ARI event error: {e}")
+        backoff = 5.0
+        while True:
+            try:
+                logger.info(f"Connecting to ARI at {self._uri}")
+                async with ws_connect(ari_url) as ws:
+                    self._ari_ws = ws
+                    backoff = 5.0
+                    async for raw in ws:
+                        try:
+                            msg = json.loads(raw)
+                            if msg.get("type") == "StasisStart":
+                                await self._on_stasis_start(msg)
+                            elif msg.get("type") == "StasisEnd":
+                                await self._on_stasis_end(msg)
+                            elif msg.get("type") == "Dial":
+                                await self._on_dial(msg)
+                        except Exception as e:
+                            logger.error(f"ARI event error: {e}")
+            except Exception as e:
+                logger.warning(f"ARI connection lost: {e}. Reconnecting in {backoff:.0f}s...")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 1.5, 60.0)
 
     async def _process_media(self, ws):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
