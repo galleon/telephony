@@ -28,7 +28,8 @@ telephony/
 │   ├── ari.conf             # ARI Auth & App definitions
 │   ├── extensions.conf      # Dialplan for Stasis(ai-assistant)
 │   ├── http.conf            # ARI Port 8088 bindings
-│   └── modules.conf         # Loadable Asterisk plugins
+│   ├── modules.conf         # Loadable Asterisk plugins
+│   └── websocket_client.conf # External Media → DGX (replace DGX_IP)
 └── agent/                   # AI Orchestrator — run on DGX Spark only
     ├── pyproject.toml       # Managed by uv
     ├── uv.lock              # Deterministic dependencies
@@ -58,11 +59,15 @@ docker compose up -d
 
 Copy `agent/.env.example` to `agent/.env` and set `MAC_IP` to your Mac's IP. Ensure **vLLM** is running on port `8000` on the DGX Spark with your chosen model (e.g., `Qwen2-VL-7B`).
 
+**Asterisk 22 requirement:** The agent connects *inbound* to Asterisk and registers the `ai-assistant` app. You **must** start the agent **before** placing any call. If a call arrives before the agent is connected, Asterisk will fail with `Failed to find outbound websocket per-call config`.
+
 ```bash
 cd agent
 uv sync
 uv run main.py
 ```
+
+You should see: `Connecting to ARI at ...` and `Starting Media server on 0.0.0.0:8787`.
 
 Environment variables in `agent/.env` (on the DGX Spark):
 | Variable | Default | Description |
@@ -77,7 +82,11 @@ Environment variables in `agent/.env` (on the DGX Spark):
 | `SPARK_IP` / `DGX_IP` | — | Spark IP so Asterisk sends audio here (e.g. `192.168.1.50`) |
 | `ARI_MEDIA_PORT` | `8787` | Media WebSocket port on DGX |
 
+**If `DGX_IP`/`SPARK_IP` are unset**, the agent uses `media_connection1` from `config/websocket_client.conf`. Edit that file and replace `DGX_IP` with your DGX's IP (as seen from the Mac), then restart Asterisk.
+
 ### 3. Place a Call
+**Order matters:** 1) Start Asterisk on Mac, 2) Start agent on DGX (wait for "Connecting to ARI"), 3) Place call.
+
 Using **Linphone** (or Zoiper):
 
 | Setting   | Value                         |
@@ -88,6 +97,8 @@ Using **Linphone** (or Zoiper):
 | Password  | password123                   |
 
 Register, then dial extension **600** to reach the AI assistant.
+
+**Debug (on Mac):** `docker exec -it pbx-gateway asterisk -rx "ari show sessions"` — you should see an inbound connection for `ai-assistant` when the agent is running.
 
 ---
 

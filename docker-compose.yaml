@@ -13,4 +13,5 @@ services:
       - ./config/http.conf:/etc/asterisk/http.conf
       - ./config/modules.conf:/etc/asterisk/modules.conf
       - ./config/pjsip.conf:/etc/asterisk/pjsip.conf
+      - ./config/websocket_client.conf:/etc/asterisk/websocket_client.conf
     restart: unless-stopped
