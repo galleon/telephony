@@ -80,7 +80,8 @@ class ARITransport(BaseTransport):
     Transport that connects to Asterisk ARI and runs a Media WebSocket server.
 
     Asterisk (on Mac) connects to the Media server on the DGX when a call enters
-    Stasis. Set DGX_IP in agent/.env to the DGX's IP (as seen from the Mac).
+    Stasis. Asterisk uses websocket_client.conf: set [media_connection1] uri to
+    ws://DGX_IP:8787/media. external_host must be the section name, not an IP.
     """
 
     def __init__(
@@ -147,15 +148,10 @@ class ARITransport(BaseTransport):
             ws_channel = str(uuid.uuid4())
             sess["ws_channel"] = ws_channel
             self._sessions[ws_channel] = sess
-            external_host = self._base_url
-            if not external_host:
-                external_host = os.getenv("DGX_IP") or os.getenv("AGENT_HOST") or os.getenv("SPARK_IP")
-            if external_host:
-                external_host = external_host.replace("http://", "").replace("https://", "").rstrip("/")
-                if ":" not in external_host:
-                    external_host = f"{external_host}:{self._media_port}"
-            if not external_host:
-                external_host = os.getenv("ARI_MEDIA_CONNECTION", "media_connection1")
+            # For WebSocket transport, external_host must be a websocket_client section name
+            # (e.g. media_connection1), not an IP. Asterisk looks up [section] in websocket_client.conf
+            # and uses its uri. Do NOT pass IP:port here—that section won't exist.
+            external_host = os.getenv("ARI_MEDIA_CONNECTION", "media_connection1")
             logger.info(f"Creating WebSocket channel for {incoming_name} (external_host={external_host})")
             await self._ari_send_request("POST", "channels/externalMedia", query_strings=[
                 {"name": "channelId", "value": ws_channel},

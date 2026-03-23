@@ -96,10 +96,10 @@ Environment variables in `agent/.env` (on the DGX Spark):
 | `WHISPER_DEVICE` | `cuda` | `cuda` for DGX, `cpu` only for non-GPU testing |
 | `PIPER_USE_CUDA` | `true` | GPU acceleration for TTS on DGX |
 | `PIPER_VOICE` | `en_US-ryan-high` | Piper TTS voice |
-| `SPARK_IP` / `DGX_IP` | — | Spark IP so Asterisk sends audio here (e.g. `192.168.1.50`) |
+| `ARI_MEDIA_CONNECTION` | `media_connection1` | Websocket client section name in Asterisk's websocket_client.conf |
 | `ARI_MEDIA_PORT` | `8787` | Media WebSocket port on DGX |
 
-**If `DGX_IP`/`SPARK_IP` are unset**, the agent uses `media_connection1` from `config/websocket_client.conf`. Edit that file and replace `DGX_IP` with your DGX's IP (as seen from the Mac), then restart Asterisk.
+**Asterisk connects via websocket_client.conf:** The agent passes `external_host=media_connection1`. Edit `config/websocket_client.conf` on the Mac and set `uri = ws://YOUR_DGX_IP:8787/media`, then restart Asterisk.
 
 ### 3. Place a Call
 **Order matters:** 1) Start Asterisk on Mac, 2) Start agent on DGX (wait for "Connecting to ARI"), 3) Place call.
