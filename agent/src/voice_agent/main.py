@@ -31,9 +31,11 @@ async def start_agent():
     logger.info(f"🚀 AI Agent starting. Listening for calls from {MAC_IP}...")
     # Run ARI client + Media server alongside the pipeline
     from pipecat.pipeline.runner import PipelineRunner
+    from pipecat.pipeline.task import PipelineTask
+    task = PipelineTask(pipeline)
     await asyncio.gather(
         transport.run(),
-        PipelineRunner().run(pipeline),
+        PipelineRunner().run(task),
     )
 
 if __name__ == "__main__":
