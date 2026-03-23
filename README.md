@@ -89,6 +89,12 @@ Using **Linphone** (or Zoiper):
 
 Register, then dial extension **600** to reach the AI assistant.
 
+### Third-party SIP trunk (optional)
+
+To use a provider number (Twilio, VoIP.ms, Telnyx, etc.), add a SIP trunk in `config/pjsip.conf` (uncomment the provider template) and set your credentials. Inbound calls will hit the `from-trunk` context and route to the AI.
+
+**Note:** Asterisk must be reachable from your provider (public IP or tunnel like ngrok). Some providers (e.g. Twilio) use IP-based routing instead of registration—check their SIP docs.
+
 ---
 
 ## 🛠️ Advanced Features
