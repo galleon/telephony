@@ -36,7 +36,13 @@ async def start_agent():
     from pipecat.pipeline.task import PipelineTask
 
     # Disable idle timeout: we wait for calls, so pipeline has no frames until call connects
-    pipecat_task = PipelineTask(pipeline, idle_timeout_secs=None, cancel_on_idle_timeout=False)
+    # Disable RTVI: we use ARI/phone, not Pipecat's WebSocket client
+    pipecat_task = PipelineTask(
+        pipeline,
+        idle_timeout_secs=None,
+        cancel_on_idle_timeout=False,
+        enable_rtvi=False,
+    )
 
     async def run_transport():
         try:
@@ -45,22 +51,38 @@ async def start_agent():
             logger.exception(f"Transport failed (ARI/Media): {e}")
             raise
 
-    runner = asyncio.create_task(asyncio.gather(
-        run_transport(),
-        PipelineRunner(handle_sigint=False, handle_sigterm=False).run(pipecat_task),
-    ))
+    transport_task = asyncio.create_task(run_transport())
+    pipeline_task = asyncio.create_task(
+        PipelineRunner(handle_sigint=False, handle_sigterm=False).run(pipecat_task)
+    )
+    tasks = [transport_task, pipeline_task]
 
     loop = asyncio.get_running_loop()
     try:
-        loop.add_signal_handler(signal.SIGINT, lambda: runner.cancel())
-        loop.add_signal_handler(signal.SIGTERM, lambda: runner.cancel())
+        def on_signal():
+            for t in tasks:
+                t.cancel()
+        loop.add_signal_handler(signal.SIGINT, on_signal)
+        loop.add_signal_handler(signal.SIGTERM, on_signal)
     except NotImplementedError:
-        pass  # Windows has no add_signal_handler
+        pass
 
-    try:
-        await runner
-    except asyncio.CancelledError:
-        logger.info("Agent shut down.")
+    # Wait for first task to finish; if one fails, cancel the other so we can log
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for t in done:
+        try:
+            exc = t.exception()
+            if exc and not isinstance(exc, asyncio.CancelledError):
+                logger.exception(f"Task failed: {exc}")
+        except asyncio.CancelledError:
+            pass
+    for t in pending:
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
+    logger.info("Agent shut down.")
 
 if __name__ == "__main__":
     asyncio.run(start_agent())
