@@ -5,6 +5,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from ..tools.handlers import fetch_order_status, transfer_to_human
 
 
@@ -59,7 +60,14 @@ def create_ai_services():
     llm = OpenAILLMService(
         api_key=os.getenv("VLLM_API_KEY", "local-spark"),
         base_url=os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
-        model=os.getenv("LLM_MODEL", "Qwen2-VL-7B-Instruct"),
+        settings=OpenAILLMService.Settings(
+            model=os.getenv("LLM_MODEL", "Qwen2-VL-7B-Instruct"),
+            system_instruction=(
+                "You are a helpful phone assistant for our company. "
+                "Speak naturally and keep responses concise for audio. "
+                "Use the provided tools to check order statuses or transfer calls."
+            ),
+        ),
     )
     llm.register_function("get_order_status", fetch_order_status)
     llm.register_function("transfer_to_support", transfer_to_human)
@@ -72,5 +80,5 @@ def create_ai_services():
         ),
     )
 
-    tools = [order_tool, transfer_tool]
+    tools = ToolsSchema(standard_tools=[order_tool, transfer_tool])
     return stt, llm, tts, tools
