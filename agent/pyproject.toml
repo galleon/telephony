@@ -1,0 +1,11 @@
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "loguru>=0.7.3",
+    "pipecat-ai[openai,piper,rtp,whisper]>=0.0.106",
+    "python-dotenv>=1.2.2",
+]

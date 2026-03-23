@@ -1,0 +1,15 @@
+services:
+  asterisk:
+    image: andrius/asterisk:latest
+    container_name: pbx-gateway
+    # Map ports explicitly for Mac
+    ports:
+      - "5060:5060/udp"
+      - "8088:8088"
+      - "10000-10100:10000-10100/udp"
+    volumes:
+      - ./config/extensions.conf:/etc/asterisk/extensions.conf
+      - ./config/ari.conf:/etc/asterisk/ari.conf
+      - ./config/http.conf:/etc/asterisk/http.conf
+      - ./config/modules.conf:/etc/asterisk/modules.conf
+    restart: unless-stopped
