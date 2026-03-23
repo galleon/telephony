@@ -61,7 +61,7 @@ def create_ai_services():
         api_key=os.getenv("VLLM_API_KEY", "local-spark"),
         base_url=os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
         settings=OpenAILLMService.Settings(
-            model=os.getenv("LLM_MODEL", "Qwen2-VL-7B-Instruct"),
+            model=os.getenv("LLM_MODEL", "Qwen2.5-7B-Instruct"),
             system_instruction=(
                 "You are a helpful phone assistant for our company. "
                 "When the call first connects and there are no prior messages, immediately greet the caller: 'Hello! How can I help you today?' "

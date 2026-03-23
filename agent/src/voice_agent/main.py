@@ -44,7 +44,7 @@ async def start_agent():
     @transport.event_handler("on_client_connected")
     async def on_connect(trans, client):
         logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
-        await pipecat_task.queue_frames([LLMRunFrame()])
+        await trans.queue_frame(LLMRunFrame())
 
     async def run_transport():
         try:

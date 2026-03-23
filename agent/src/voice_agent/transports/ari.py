@@ -239,9 +239,7 @@ class ARITransport(BaseTransport):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
         if self._output_proc:
             self._output_proc._ws = ws
-        if "on_client_connected" in self._handlers:
-            await self._handlers["on_client_connected"](self, ws)
-        # Pipeline expects StartFrame before any audio; queue it so processor receives it
+        # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
             start = StartFrame(
                 allow_interruptions=True,
@@ -249,6 +247,8 @@ class ARITransport(BaseTransport):
                 audio_out_sample_rate=self.params.audio_out_sample_rate,
             )
             await self._input_proc.queue_frame(start)
+        if "on_client_connected" in self._handlers:
+            await self._handlers["on_client_connected"](self, ws)
         try:
             optimal_frame_size = 160
             async for message in ws:
@@ -282,6 +282,11 @@ class ARITransport(BaseTransport):
         logger.info(f"Starting Media server on {self._media_host}:{self._media_port}")
         async with ws_serve(handler, self._media_host, self._media_port, subprotocols=["media"]) as server:
             await server.wait_closed()
+
+    async def queue_frame(self, frame):
+        """Queue a frame to the pipeline input (e.g. LLMRunFrame after StartFrame)."""
+        if self._input_proc:
+            await self._input_proc.queue_frame(frame)
 
     def input(self):
         from pipecat.transports.base_input import BaseInputTransport

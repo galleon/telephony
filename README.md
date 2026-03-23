@@ -57,15 +57,32 @@ docker compose up -d
 ### 2. Inference Engine Setup (DGX Spark only)
 **Run these commands on the DGX Spark machine—not on the Mac.** The agent must run on DGX Spark for GPU-accelerated STT/LLM/TTS.
 
-Copy `agent/.env.example` to `agent/.env` and set `MAC_IP` to your Mac's IP. Ensure **vLLM** is running on port `8000` on the DGX Spark with your chosen model (e.g., `Qwen2-VL-7B`).
+Copy `agent/.env.example` to `agent/.env` and set `MAC_IP` to your Mac's IP.
 
-**Asterisk 22 requirement:** The agent connects *inbound* to Asterisk and registers the `ai-assistant` app. You **must** start the agent **before** placing any call. If a call arrives before the agent is connected, Asterisk will fail with `Failed to find outbound websocket per-call config`.
+**Option A — Docker Compose (recommended)**  
+Starts vLLM + agent in one go:
 
 ```bash
+cd agent
+docker compose up -d
+```
+
+The agent waits for vLLM to be healthy before starting. Ensure `config/websocket_client.conf` (on the Mac) points to the DGX's IP and port 8787.
+
+**Option B — Manual**  
+Start vLLM separately, then the agent:
+
+```bash
+# Terminal 1: vLLM (or use your own vLLM startup)
+vllm serve Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 8000
+
+# Terminal 2: Agent
 cd agent
 uv sync
 uv run main.py
 ```
+
+**Asterisk 22 requirement:** The agent connects *inbound* to Asterisk and registers the `ai-assistant` app. You **must** start the agent **before** placing any call. If a call arrives before the agent is connected, Asterisk will fail with `Failed to find outbound websocket per-call config`.
 
 You should see: `Connecting to ARI at ...` and `Starting Media server on 0.0.0.0:8787`.
 
@@ -74,8 +91,8 @@ Environment variables in `agent/.env` (on the DGX Spark):
 |----------|---------|-------------|
 | `MAC_IP` | `192.168.1.23` | IP of the Mac running Asterisk (agent connects to this) |
 | `ARI_USER` / `ARI_PASS` | — | ARI credentials for the Mac gateway |
-| `VLLM_BASE_URL` | `http://localhost:8000/v1` | vLLM API (localhost = DGX Spark) |
-| `LLM_MODEL` | `Qwen2-VL-7B-Instruct` | Model name |
+| `VLLM_BASE_URL` | `http://localhost:8000/v1` | vLLM API (overridden to `http://vllm:8000/v1` in docker-compose) |
+| `LLM_MODEL` | `Qwen2.5-7B-Instruct` | Model name (must match vLLM `--served-model-name`) |
 | `WHISPER_DEVICE` | `cuda` | `cuda` for DGX, `cpu` only for non-GPU testing |
 | `PIPER_USE_CUDA` | `true` | GPU acceleration for TTS on DGX |
 | `PIPER_VOICE` | `en_US-ryan-high` | Piper TTS voice |
@@ -99,6 +116,15 @@ Using **Linphone** (or Zoiper):
 Register, then dial extension **600** to reach the AI assistant.
 
 **Debug (on Mac):** `docker exec -it pbx-gateway asterisk -rx "ari show sessions"` — you should see an inbound connection for `ai-assistant` when the agent is running.
+
+### Asterisk logging
+- **RTP packet dumps** (very verbose): `rtp set debug on` — turn off with `rtp set debug off` when done.
+- **Reduce verbosity:** `core set debug 0` (or a lower number like 3) to limit general debug output.
+- **Category-based** (Asterisk 16.15+): `core set debug category off rtp` to disable RTP debug without affecting other categories.
+
+### No audio on phone
+- Ensure **vLLM is running** on the DGX: `curl http://localhost:8000/v1/models`
+- If vLLM is not running, the LLM step fails silently and no TTS is produced. Start vLLM first, or set `OPENAI_API_KEY` and `VLLM_BASE_URL` to use OpenAI instead.
 
 ---
 
