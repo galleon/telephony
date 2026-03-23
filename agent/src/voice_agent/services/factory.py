@@ -52,6 +52,7 @@ def create_ai_services():
         properties={
             "reason": {"type": "string", "description": "Short summary of why the user needs a human"}
         },
+        required=[],  # reason is optional
     )
 
     # 3. LLM: vLLM with OpenAI-compatible API
