@@ -94,12 +94,13 @@ class ARITransport(BaseTransport):
         params: Optional[TransportParams] = None,
         **kwargs,
     ):
-        super().__init__(params or TransportParams(
+        super().__init__(**kwargs)
+        self.params = params or TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             audio_in_sample_rate=PIPELINE_SAMPLE_RATE,
             audio_out_sample_rate=PIPELINE_SAMPLE_RATE,
-        ), **kwargs)
+        )
         self._uri = uri.replace("http://", "ws://").replace("https://", "wss://")
         self._username = username
         self._password = password
