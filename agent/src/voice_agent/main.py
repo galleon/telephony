@@ -1,5 +1,6 @@
 import asyncio
 import os
+import signal
 from pathlib import Path
 
 from loguru import logger
@@ -33,14 +34,23 @@ async def start_agent():
     # Run ARI client + Media server alongside the pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineTask
-    task = PipelineTask(pipeline)
-    await asyncio.gather(
+    pipecat_task = PipelineTask(pipeline)
+    runner = asyncio.create_task(asyncio.gather(
         transport.run(),
-        PipelineRunner().run(task),
-    )
+        PipelineRunner().run(pipecat_task),
+    ))
+
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT, lambda: runner.cancel())
+        loop.add_signal_handler(signal.SIGTERM, lambda: runner.cancel())
+    except NotImplementedError:
+        pass  # Windows has no add_signal_handler
+
+    try:
+        await runner
+    except asyncio.CancelledError:
+        logger.info("Agent shut down.")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(start_agent())
-    except KeyboardInterrupt:
-        logger.info("Agent shut down.")
+    asyncio.run(start_agent())
