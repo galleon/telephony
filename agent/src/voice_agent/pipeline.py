@@ -1,10 +1,12 @@
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.transports.network.ari import ARITransport
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+
 from .services.factory import create_ai_services
+from .transports.ari import ARITransport
+
 
 def configure_bot(mac_ip: str, ari_user: str, ari_pass: str):
-    # 1. Transport: Connects DGX Spark to your Mac PBX
+    # 1. Transport: ARI client (connects to Mac) + Media server (Asterisk connects to DGX)
     transport = ARITransport(
         uri=f"http://{mac_ip}:8088",
         username=ari_user,

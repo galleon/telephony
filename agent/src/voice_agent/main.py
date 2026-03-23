@@ -15,13 +15,16 @@ async def start_agent():
     pipeline, transport = configure_bot(MAC_IP, ARI_USER, ARI_PASS)
 
     @transport.event_handler("on_client_connected")
-    async def on_connect(transport, client):
+    async def on_connect(trans, client):
         logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
 
     logger.info(f"🚀 AI Agent starting. Listening for calls from {MAC_IP}...")
-    
+    # Run ARI client + Media server alongside the pipeline
     from pipecat.pipeline.runner import PipelineRunner
-    await PipelineRunner().run(pipeline)
+    await asyncio.gather(
+        transport.run(),
+        PipelineRunner().run(pipeline),
+    )
 
 if __name__ == "__main__":
     try:

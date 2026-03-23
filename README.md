@@ -74,6 +74,8 @@ Environment variables in `agent/.env` (on the DGX Spark):
 | `WHISPER_DEVICE` | `cuda` | `cuda` for DGX, `cpu` only for non-GPU testing |
 | `PIPER_USE_CUDA` | `true` | GPU acceleration for TTS on DGX |
 | `PIPER_VOICE` | `en_US-ryan-high` | Piper TTS voice |
+| `DGX_IP` | — | DGX Spark IP (Mac must reach this for ARI Media) |
+| `ARI_MEDIA_PORT` | `8787` | Media WebSocket port on DGX |
 
 ### 3. Place a Call
 Open a SIP client (Linphone/Zoiper) on your Mac and dial extension **600**.
