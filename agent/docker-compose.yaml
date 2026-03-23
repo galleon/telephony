@@ -25,11 +25,11 @@ x-vllm: &vllm
       max-size: "50m"
       max-file: "5"
   healthcheck:
-    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/models')"]
-    interval: 10s
-    timeout: 5s
-    retries: 12
-    start_period: 90s
+    test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=10)"]
+    interval: 15s
+    timeout: 10s
+    retries: 20
+    start_period: 300s
 
 services:
   vllm:
