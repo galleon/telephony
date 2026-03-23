@@ -241,14 +241,14 @@ class ARITransport(BaseTransport):
             self._output_proc._ws = ws
         if "on_client_connected" in self._handlers:
             await self._handlers["on_client_connected"](self, ws)
-        # Pipeline expects StartFrame before any audio; push it when call connects
+        # Pipeline expects StartFrame before any audio; queue it so processor receives it
         if self._input_proc:
             start = StartFrame(
                 allow_interruptions=True,
                 audio_in_sample_rate=self.params.audio_in_sample_rate,
                 audio_out_sample_rate=self.params.audio_out_sample_rate,
             )
-            await self._input_proc.push_frame(start)
+            await self._input_proc.queue_frame(start)
         try:
             optimal_frame_size = 160
             async for message in ws:
@@ -266,12 +266,12 @@ class ARITransport(BaseTransport):
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
                         pcm, _ = audioop.ratecv(pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, None)
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
-                    await self._input_proc.push_frame(frame)
+                    await self._input_proc.queue_frame(frame)
         except Exception as e:
             logger.error(f"Media error: {e}")
         finally:
             if self._input_proc:
-                await self._input_proc.push_frame(EndFrame())
+                await self._input_proc.queue_frame(EndFrame())
             logger.info("Media WebSocket disconnected")
             if "on_client_disconnected" in self._handlers:
                 await self._handlers["on_client_disconnected"](self, ws)
