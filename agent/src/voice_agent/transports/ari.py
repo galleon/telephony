@@ -241,6 +241,14 @@ class ARITransport(BaseTransport):
             self._output_proc._ws = ws
         if "on_client_connected" in self._handlers:
             await self._handlers["on_client_connected"](self, ws)
+        # Pipeline expects StartFrame before any audio; push it when call connects
+        if self._input_proc:
+            start = StartFrame(
+                allow_interruptions=True,
+                audio_in_sample_rate=self.params.audio_in_sample_rate,
+                audio_out_sample_rate=self.params.audio_out_sample_rate,
+            )
+            await self._input_proc.push_frame(start)
         try:
             optimal_frame_size = 160
             async for message in ws:
