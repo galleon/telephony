@@ -1,5 +1,6 @@
 import os
 
+from loguru import logger
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.services.piper.tts import PiperTTSService
@@ -8,14 +9,32 @@ from ..tools.handlers import fetch_order_status, transfer_to_human
 
 
 def create_ai_services():
-    # 1. STT: Local Whisper — defaults tuned for DGX Spark (CUDA). Use cpu on Mac only for dev.
-    stt = WhisperSTTService(
-        device=os.getenv("WHISPER_DEVICE", "cuda"),
-        compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
-        settings=WhisperSTTService.Settings(
-            model=os.getenv("WHISPER_MODEL", "base"),
-        ),
-    )
+    # 1. STT: Local Whisper — try CUDA first, fall back to CPU (aarch64 CTranslate2 wheels are CPU-only)
+    device = os.getenv("WHISPER_DEVICE", "cuda")
+    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+    try:
+        stt = WhisperSTTService(
+            device=device,
+            compute_type=compute_type,
+            settings=WhisperSTTService.Settings(
+                model=os.getenv("WHISPER_MODEL", "base"),
+            ),
+        )
+    except ValueError as e:
+        if "CUDA" in str(e):
+            logger.warning(
+                f"Whisper CUDA unavailable ({e}). Falling back to CPU. "
+                "On aarch64/DGX Spark, CTranslate2 PyPI wheels are CPU-only; build from source for GPU."
+            )
+            stt = WhisperSTTService(
+                device="cpu",
+                compute_type="int8",  # int8 is faster on CPU
+                settings=WhisperSTTService.Settings(
+                    model=os.getenv("WHISPER_MODEL", "base"),
+                ),
+            )
+        else:
+            raise
 
     # 2. Define the tool schemas
     order_tool = FunctionSchema(
