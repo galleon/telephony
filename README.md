@@ -78,7 +78,16 @@ Environment variables in `agent/.env` (on the DGX Spark):
 | `ARI_MEDIA_PORT` | `8787` | Media WebSocket port on DGX |
 
 ### 3. Place a Call
-Open a SIP client (Linphone/Zoiper) on your Mac and dial extension **600**.
+Using **Linphone** (or Zoiper):
+
+| Setting   | Value                         |
+|-----------|-------------------------------|
+| Server    | `MAC_IP` (e.g. 192.168.1.23)  |
+| Port      | 5060                          |
+| Username  | 6001                          |
+| Password  | password123                   |
+
+Register, then dial extension **600** to reach the AI assistant.
 
 ---
 

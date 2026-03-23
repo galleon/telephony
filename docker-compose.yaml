@@ -12,4 +12,5 @@ services:
       - ./config/ari.conf:/etc/asterisk/ari.conf
       - ./config/http.conf:/etc/asterisk/http.conf
       - ./config/modules.conf:/etc/asterisk/modules.conf
+      - ./config/pjsip.conf:/etc/asterisk/pjsip.conf
     restart: unless-stopped
