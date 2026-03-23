@@ -11,3 +11,6 @@ wheels/
 
 # Environment and secrets
 .env
+
+# Model cache (Whisper, etc.)
+.cache/

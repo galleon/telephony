@@ -1,10 +1,20 @@
 import asyncio
 import os
+from pathlib import Path
+
 from loguru import logger
 from dotenv import load_dotenv
-from .pipeline import configure_bot
 
 load_dotenv()
+
+# Use project-local HF cache to avoid permission issues with ~/.cache
+_agent_root = Path(__file__).resolve().parent.parent.parent
+_cache = _agent_root / ".cache" / "huggingface"
+_cache.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_cache))
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_cache))
+
+from .pipeline import configure_bot
 
 async def start_agent():
     # Load settings from .env (agent runs on DGX Spark; MAC_IP = Mac running Asterisk)
