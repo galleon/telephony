@@ -122,6 +122,14 @@ Register, then dial extension **600** to reach the AI assistant.
 - **Reduce verbosity:** `core set debug 0` (or a lower number like 3) to limit general debug output.
 - **Category-based** (Asterisk 16.15+): `core set debug category off rtp` to disable RTP debug without affecting other categories.
 
+### "Stasis app 'ai-assistant' doesn't exist" / "Failed to find outbound websocket per-call config"
+The agent must be **running and connected to ARI** before you place a call. Asterisk only routes Stasis channels to an app once an ARI client has subscribed.
+
+1. **Start the agent on the DGX** and wait for `Connecting to ARI at ...` in its logs.
+2. **Check connectivity** — from the Mac: `docker exec -it pbx-gateway asterisk -rx "ari show sessions"`. You should see an inbound session for `ai-assistant`. If not, the agent isn't reaching Asterisk.
+3. **Verify `MAC_IP`** in `agent/.env` — must be the Mac's IP as reachable from the DGX (e.g. `192.168.1.23`). Port **8088** must be open on the Mac.
+4. **Place the call only after** the agent shows it is connected.
+
 ### No audio on phone
 - Ensure **vLLM is running** on the DGX: `curl http://localhost:8000/v1/models`
 - If vLLM is not running, the LLM step fails silently and no TTS is produced. Start vLLM first, or set `OPENAI_API_KEY` and `VLLM_BASE_URL` to use OpenAI instead.
