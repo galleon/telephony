@@ -327,7 +327,11 @@ class _ARIOutputProcessor(FrameProcessor):
             return [frame]
         if isinstance(frame, OutputAudioRawFrame) and self._ws and self._ws.state == 1:
             try:
-                ulaw = audioop.lin2ulaw(frame.audio, 2)
+                pcm = frame.audio
+                sr = getattr(frame, "sample_rate", None) or PIPELINE_SAMPLE_RATE
+                if sr != ULAW_SAMPLE_RATE:
+                    pcm, _ = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, None)
+                ulaw = audioop.lin2ulaw(pcm, 2)
                 await self._ws.send(ulaw)
             except Exception:
                 pass

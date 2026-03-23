@@ -64,6 +64,7 @@ def create_ai_services():
             model=os.getenv("LLM_MODEL", "Qwen2-VL-7B-Instruct"),
             system_instruction=(
                 "You are a helpful phone assistant for our company. "
+                "When the call first connects and there are no prior messages, immediately greet the caller: 'Hello! How can I help you today?' "
                 "Speak naturally and keep responses concise for audio. "
                 "Use the provided tools to check order statuses or transfer calls."
             ),

@@ -15,6 +15,8 @@ _cache.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("HF_HOME", str(_cache))
 os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_cache))
 
+from pipecat.frames.frames import LLMRunFrame
+
 from .pipeline import configure_bot
 
 async def start_agent():
@@ -26,12 +28,7 @@ async def start_agent():
     base_url = os.getenv("SPARK_IP") or os.getenv("DGX_IP") or os.getenv("AGENT_HOST")
     pipeline, transport = configure_bot(MAC_IP, ARI_USER, ARI_PASS, base_url=base_url)
 
-    @transport.event_handler("on_client_connected")
-    async def on_connect(trans, client):
-        logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
-
     logger.info(f"🚀 AI Agent starting. Listening for calls from {MAC_IP}...")
-    # Run ARI client + Media server alongside the pipeline
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineTask
 
@@ -43,6 +40,11 @@ async def start_agent():
         cancel_on_idle_timeout=False,
         enable_rtvi=False,
     )
+
+    @transport.event_handler("on_client_connected")
+    async def on_connect(trans, client):
+        logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
+        await pipecat_task.queue_frames([LLMRunFrame()])
 
     async def run_transport():
         try:
