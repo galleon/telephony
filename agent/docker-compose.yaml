@@ -6,6 +6,9 @@
 #
 # Asterisk (on Mac) must be running first. Start order: 1) Asterisk, 2) this compose.
 
+volumes:
+  vllm_cache:
+
 x-vllm: &vllm
   image: nvcr.io/nvidia/vllm:26.02-py3
   deploy:
