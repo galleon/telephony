@@ -25,7 +25,7 @@ async def start_agent():
     ARI_USER = os.getenv("ARI_USER", "ai_user")
     ARI_PASS = os.getenv("ARI_PASS", "your_password")
 
-    pipeline, transport = configure_bot(ASTERISK_IP, ARI_USER, ARI_PASS)
+    pipeline, transport, llm_context = configure_bot(ASTERISK_IP, ARI_USER, ARI_PASS)
 
     logger.info(f"🚀 AI Agent starting. Listening for calls from {ASTERISK_IP}...")
     from pipecat.pipeline.runner import PipelineRunner
@@ -43,6 +43,8 @@ async def start_agent():
     @transport.event_handler("on_client_connected")
     async def on_connect(trans, client):
         logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
+        # Fresh call: clear history so the model greets instead of continuing a prior turn
+        llm_context.set_messages([])
         await trans.queue_frame(LLMRunFrame())
 
     async def run_transport():

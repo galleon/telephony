@@ -19,6 +19,7 @@ import uuid
 from typing import Optional
 
 from loguru import logger
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     EndFrame,
     InputAudioRawFrame,
@@ -282,7 +283,7 @@ class ARITransport(BaseTransport):
             self._output_proc._ulaw_buffer.clear()
             self._output_proc._last_send_time = 0.0
             self._output_proc._bytes_sent = 0
-            self._output_proc._ratecv_state = None
+            self._output_proc._pcm_resampler = create_stream_resampler()
         # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
@@ -296,7 +297,7 @@ class ARITransport(BaseTransport):
             await self._handlers["on_client_connected"](self, ws)
         try:
             optimal_frame_size = 160
-            input_ratecv_state = None
+            in_resampler = create_stream_resampler()
             async for message in ws:
                 if isinstance(message, str):
                     if "MEDIA_START" in message:
@@ -310,8 +311,8 @@ class ARITransport(BaseTransport):
                 if self._input_proc:
                     pcm = audioop.ulaw2lin(message, 2)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
-                        pcm, input_ratecv_state = audioop.ratecv(
-                            pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, input_ratecv_state
+                        pcm = await in_resampler.resample(
+                            pcm, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE
                         )
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
                     await self._input_proc.queue_frame(frame)
@@ -389,8 +390,8 @@ class _ARIOutputProcessor(FrameProcessor):
         self._bytes_sent = 0
         self._frames_received = 0
         self._buffering_started = False
-        # ratecv state must persist across OutputAudioRawFrame chunks (reset on TTS stop / new call)
-        self._ratecv_state = None
+        # SOXR stream resampler (same stack as Piper); new instance per media session / TTS utterance boundary
+        self._pcm_resampler = create_stream_resampler()
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -430,7 +431,7 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
-            self._ratecv_state = None
+            self._pcm_resampler = create_stream_resampler()
             if self._buffering_started and self._ws and self._ws.state == 1:
                 try:
                     await self._ws.send("STOP_MEDIA_BUFFERING")
@@ -471,9 +472,7 @@ class _ARIOutputProcessor(FrameProcessor):
                     pcm = audioop.tomono(pcm, 2, 0.5, 0.5)
                     nch = 1
                 if sr != ULAW_SAMPLE_RATE:
-                    pcm, self._ratecv_state = audioop.ratecv(
-                        pcm, 2, nch, sr, ULAW_SAMPLE_RATE, self._ratecv_state
-                    )
+                    pcm = await self._pcm_resampler.resample(pcm, sr, ULAW_SAMPLE_RATE)
                 ulaw = audioop.lin2ulaw(pcm, 2)
                 await self._send_ulaw(ulaw)
         except Exception as e:

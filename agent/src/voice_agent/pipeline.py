@@ -34,4 +34,4 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
         assistant_aggregator,
     ])
 
-    return pipeline, transport
+    return pipeline, transport, context
