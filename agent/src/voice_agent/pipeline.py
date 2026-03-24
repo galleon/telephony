@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -22,6 +23,11 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.user_mute import AlwaysUserMuteStrategy
+
+# Whisper artifacts — square-bracket tags that contain no real speech.
+# If the transcription is *only* these tags (nothing else after stripping them),
+# drop the frame so the LLM never sees the noise.
+_ARTIFACT_RE = re.compile(r"\[[^\]]*\]")
 
 from .services.factory import create_ai_services
 from .transports.ari import ARITransport
@@ -86,15 +92,25 @@ class _FunctionCallFiller(FrameProcessor):
 
 
 class _SttTranscriptionLogger(FrameProcessor):
-    """Logs final/interim transcriptions so we can confirm caller audio reaches Whisper."""
+    """Logs and filters STT transcriptions.
+
+    Drops TranscriptionFrames that contain only Whisper noise artifacts
+    (e.g. [BLANK_AUDIO], [MUSIC PLAYING]) so the LLM never sees them.
+    InterimTranscriptionFrames are passed through unchanged (they don't
+    reach the LLM aggregator anyway).
+    """
 
     async def process_frame(self, frame, direction):
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
-        if direction == FrameDirection.DOWNSTREAM and isinstance(
-            frame, (TranscriptionFrame, InterimTranscriptionFrame)
-        ):
-            logger.info(f"STT {type(frame).__name__}: {frame.text!r}")
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
+            real_text = _ARTIFACT_RE.sub("", frame.text).strip()
+            if not real_text:
+                logger.debug(f"STT artifact dropped: {frame.text!r}")
+                return []
+            logger.info(f"STT TranscriptionFrame: {frame.text!r}")
+        elif direction == FrameDirection.DOWNSTREAM and isinstance(frame, InterimTranscriptionFrame):
+            logger.info(f"STT InterimTranscriptionFrame: {frame.text!r}")
         await self.push_frame(frame, direction)
         return []
 
