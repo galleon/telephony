@@ -87,20 +87,19 @@ def create_ai_services():
         use_cuda=piper_cuda,
         settings=PiperTTSService.Settings(voice=piper_voice),
     )
-    _cuda_note = ""
-    if piper_cuda:
-        try:
-            import onnxruntime as _ort
-            _providers = _ort.get_available_providers()
-            if "CUDAExecutionProvider" not in _providers:
-                _cuda_note = f"  WARNING: CUDAExecutionProvider unavailable (got {_providers}) — running on CPU"
-                logger.warning(
-                    "Piper: CUDAExecutionProvider not found. Piper TTS will run on CPU. "
-                    "Rebuild the container to install onnxruntime-gpu."
-                )
-        except ImportError:
-            pass
-    logger.info(f"TTS  | Piper voice={piper_voice!r}  cuda={piper_cuda}  cache={piper_cache}{_cuda_note}")
+    try:
+        import onnxruntime as _ort
+        _providers = _ort.get_available_providers()
+        _using_cuda = "CUDAExecutionProvider" in _providers
+    except ImportError:
+        _providers, _using_cuda = [], False
+    if piper_cuda and not _using_cuda:
+        logger.info(
+            f"TTS  | Piper voice={piper_voice!r}  cuda=False (onnxruntime-gpu has no aarch64 wheels; "
+            "Piper runs on CPU)"
+        )
+    else:
+        logger.info(f"TTS  | Piper voice={piper_voice!r}  cuda={_using_cuda}  cache={piper_cache}")
 
     tools = ToolsSchema(standard_tools=[order_tool, transfer_tool])
     return stt, llm, tts, tools

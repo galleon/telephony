@@ -12,11 +12,11 @@ COPY src/ src/
 COPY main.py ./
 RUN uv sync --no-dev
 
-# pipecat[piper] pulls in the CPU-only `onnxruntime` wheel. Replace it with the
-# GPU build so Piper TTS can use CUDAExecutionProvider on DGX Spark GB10.
-# CUDA libraries are injected at runtime by NVIDIA Container Toolkit when the
-# container starts with `deploy.resources.reservations.devices: [nvidia]`.
-RUN uv pip install "onnxruntime-gpu>=1.19"
+# NOTE: onnxruntime-gpu has no aarch64 PyPI wheels (x86_64 only), so Piper TTS
+# runs on CPU via the standard onnxruntime wheel. The call-filler phrase
+# ("One moment please.") mitigates perceived latency while TTS synthesises.
+# For GPU Piper on aarch64, build onnxruntime from source against CUDA or switch
+# to a PyTorch-based TTS (e.g. Kokoro) which ships aarch64 CUDA wheels.
 
 # Piper downloads voices to cwd if missing; ensure writable
 RUN mkdir -p .cache/huggingface
