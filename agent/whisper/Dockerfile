@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/usr/local/cuda/bin:${PATH}
+# libcuda.so.1 is provided by the host driver at runtime, not baked into the image.
+# Point the linker at the CUDA stub so the build links successfully; the real
+# driver library is used at runtime via the NVIDIA container runtime mount.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
 WORKDIR /whisper
 
