@@ -36,8 +36,11 @@ RUN wget -q --show-progress \
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin"
 
 EXPOSE 8080
+# --processors 1: process audio as a single chunk.
+# With --processors 2 whisper splits short clips (~1-2 s) at ~0.9 s boundaries;
+# each half is too short for accurate transcription → hallucinated words / garbled output.
 CMD ["/bin/sh", "-c", \
      "exec /whisper/build/bin/whisper-server \
         --host 0.0.0.0 --port 8080 \
         -m /whisper/models/ggml-${WHISPER_MODEL}.bin \
-        --threads 4 --processors 2"]
+        --threads 8 --processors 1"]
