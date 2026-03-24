@@ -205,16 +205,19 @@ class ARITransport(BaseTransport):
         pass
 
     async def _create_bridge_and_answer(self, sess):
-        """Create mixing bridge between phone and media channel, then answer."""
+        """Create mixing bridge between phone and media channel. Answer phone first so it can receive mixed audio."""
         if sess.get("bridge_id"):
             return  # Already bridged (e.g. from Dial event)
+        # Answer the phone channel first so it's ready to receive bridge audio
+        await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
         bridge_id = str(uuid.uuid4())
         sess["bridge_id"] = bridge_id
         logger.info(f"Creating bridge {bridge_id} for {sess.get('incoming_name', '?')} <-> {sess.get('ws_channel_name', '?')}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}?type=mixing")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['incoming']}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['ws_channel']}")
-        await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
+        # Brief delay so Asterisk finishes bridge setup before we send audio
+        await asyncio.sleep(0.3)
 
     async def _on_dial(self, msg):
         chan_name = msg.get("peer", {}).get("name", "")
