@@ -15,27 +15,27 @@ def create_ai_services():
     # 1. STT: Local Whisper — try CUDA first, fall back to CPU (aarch64 CTranslate2 wheels are CPU-only)
     device = os.getenv("WHISPER_DEVICE", "cuda")
     compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+    whisper_model = os.getenv("WHISPER_MODEL", "base")
     try:
         stt = WhisperSTTService(
             device=device,
             compute_type=compute_type,
-            settings=WhisperSTTService.Settings(
-                model=os.getenv("WHISPER_MODEL", "base"),
-            ),
+            settings=WhisperSTTService.Settings(model=whisper_model),
         )
+        logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}")
     except ValueError as e:
         if "CUDA" in str(e):
             logger.warning(
                 f"Whisper CUDA unavailable ({e}). Falling back to CPU. "
                 "On aarch64/DGX Spark, CTranslate2 PyPI wheels are CPU-only; build from source for GPU."
             )
+            device, compute_type = "cpu", "int8"
             stt = WhisperSTTService(
-                device="cpu",
-                compute_type="int8",  # int8 is faster on CPU
-                settings=WhisperSTTService.Settings(
-                    model=os.getenv("WHISPER_MODEL", "base"),
-                ),
+                device=device,
+                compute_type=compute_type,
+                settings=WhisperSTTService.Settings(model=whisper_model),
             )
+            logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}  (CPU fallback)")
         else:
             raise
 
@@ -55,11 +55,14 @@ def create_ai_services():
     )
 
     # 3. LLM: vLLM with OpenAI-compatible API
+    llm_base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+    llm_model = os.getenv("LLM_MODEL", "Qwen2.5-7B-Instruct")
+    logger.info(f"LLM  | model={llm_model!r}  base_url={llm_base_url}")
     llm = OpenAILLMService(
         api_key=os.getenv("VLLM_API_KEY", "local-spark"),
-        base_url=os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
+        base_url=llm_base_url,
         settings=OpenAILLMService.Settings(
-            model=os.getenv("LLM_MODEL", "Qwen2.5-7B-Instruct"),
+            model=llm_model,
             system_instruction=(
                 "You are a helpful phone assistant for our company. "
                 "The caller has already heard a spoken greeting; "
@@ -77,13 +80,14 @@ def create_ai_services():
     # Persist Piper voice in cache dir (mounted volume in Docker)
     piper_cache = Path(os.getenv("PIPER_CACHE_DIR", "/app/.cache/piper"))
     piper_cache.mkdir(parents=True, exist_ok=True)
+    piper_voice = os.getenv("PIPER_VOICE", "en_US-ryan-high")
+    piper_cuda = os.getenv("PIPER_USE_CUDA", "true").lower() == "true"
     tts = PiperTTSService(
         download_dir=piper_cache,
-        use_cuda=os.getenv("PIPER_USE_CUDA", "true").lower() == "true",
-        settings=PiperTTSService.Settings(
-            voice=os.getenv("PIPER_VOICE", "en_US-ryan-high"),
-        ),
+        use_cuda=piper_cuda,
+        settings=PiperTTSService.Settings(voice=piper_voice),
     )
+    logger.info(f"TTS  | Piper voice={piper_voice!r}  cuda={piper_cuda}  cache={piper_cache}")
 
     tools = ToolsSchema(standard_tools=[order_tool, transfer_tool])
     return stt, llm, tts, tools
