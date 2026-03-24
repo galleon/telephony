@@ -21,6 +21,8 @@ from typing import Optional
 from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     EndFrame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
@@ -325,6 +327,7 @@ class ARITransport(BaseTransport):
         finally:
             if self._output_proc:
                 self._output_proc._cancel_pending_stop_buffering()
+                await self._output_proc.reset_bot_speaking_state()
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
             op = self._output_proc
@@ -396,6 +399,9 @@ _ULAW_WARMUP_SILENCE = audioop.lin2ulaw(b"\x00\x00" * (160 * 12), 2)
 # Debounce STOP_MEDIA_BUFFERING so back-to-back Piper phrases ("Hello!" + "How can I help…")
 # stay in one buffer session; immediate STOP/START between phrases clips the next phrase start.
 _STOP_BUFFERING_DEBOUNCE_S = 0.22
+# After TTSStoppedFrame, wait this long before BotStoppedSpeakingFrame so multi-sentence
+# Piper output does not briefly unmute between phrases (echo would reach VAD/STT).
+_BOT_STOP_AFTER_TTS_DEBOUNCE_S = float(os.getenv("BOT_STOP_AFTER_TTS_DEBOUNCE_S", "0.45"))
 
 
 class _ARIOutputProcessor(FrameProcessor):
@@ -414,6 +420,44 @@ class _ARIOutputProcessor(FrameProcessor):
         self._pcm_resampler = create_stream_resampler()
         self._prepended_outbound_warmup = False
         self._stop_buffering_task: Optional[asyncio.Task] = None
+        # Pipecat BaseOutputTransport emits these; we need them for STTMuteFilter / user mute
+        # so phone echo during TTS is not treated as the caller speaking.
+        self._bot_out_active = False
+        self._bot_stop_task: Optional[asyncio.Task] = None
+
+    def _cancel_bot_stop_task(self):
+        t = self._bot_stop_task
+        if t and not t.done():
+            t.cancel()
+        self._bot_stop_task = None
+
+    async def reset_bot_speaking_state(self):
+        """Call when the media WebSocket ends so Pipecat does not stay 'bot speaking' / muted."""
+        self._cancel_bot_stop_task()
+        if self._bot_out_active:
+            self._bot_out_active = False
+            await self.broadcast_frame(BotStoppedSpeakingFrame)
+
+    async def _emit_bot_started(self):
+        if self._bot_out_active:
+            return
+        self._bot_out_active = True
+        await self.broadcast_frame(BotStartedSpeakingFrame)
+
+    async def _emit_bot_stopped(self):
+        if not self._bot_out_active:
+            return
+        self._bot_out_active = False
+        await self.broadcast_frame(BotStoppedSpeakingFrame)
+
+    async def _debounced_bot_stopped_after_tts(self):
+        try:
+            await asyncio.sleep(_BOT_STOP_AFTER_TTS_DEBOUNCE_S)
+            await self._emit_bot_stopped()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._bot_stop_task = None
 
     def _cancel_pending_stop_buffering(self):
         t = self._stop_buffering_task
@@ -478,6 +522,9 @@ class _ARIOutputProcessor(FrameProcessor):
         if isinstance(frame, TTSStoppedFrame):
             self._cancel_pending_stop_buffering()
             self._stop_buffering_task = asyncio.create_task(self._debounced_stop_media_buffering())
+            # Debounce: Piper often sends TTSStopped between sentences in one reply.
+            self._cancel_bot_stop_task()
+            self._bot_stop_task = asyncio.create_task(self._debounced_bot_stopped_after_tts())
             await self.push_frame(frame, direction)
             return []
         if not isinstance(frame, OutputAudioRawFrame):
@@ -492,6 +539,8 @@ class _ARIOutputProcessor(FrameProcessor):
             logger.debug(f"ARI output: received OutputAudioRawFrame but ws.state={self._ws.state} (need 1=OPEN)")
             await self.push_frame(frame, direction)
             return []
+        self._cancel_bot_stop_task()
+        await self._emit_bot_started()
         self._cancel_pending_stop_buffering()
         self._frames_received += 1
         if self._frames_received == 1:

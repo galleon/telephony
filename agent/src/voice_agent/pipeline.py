@@ -6,9 +6,14 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import InterimTranscriptionFrame, StartFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.audio.vad_processor import VADProcessor
+from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.turns.user_mute import AlwaysUserMuteStrategy
 
 from .services.factory import create_ai_services
 from .transports.ari import ARITransport
@@ -43,6 +48,12 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     # 2. Services: Fetch local Blackwell-optimized models and tool schemas
     stt, llm, tts, tools = create_ai_services()
 
+    # Drop inbound audio while the bot is speaking (phone echo otherwise hits VAD/STT).
+    # BotStarted/BotStoppedSpeakingFrame are broadcast from _ARIOutputProcessor.
+    stt_mute = STTMuteFilter(
+        config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}),
+    )
+
     # WhisperSTTService subclasses SegmentedSTTService: it only runs Whisper after
     # VADUserStoppedSpeakingFrame. Without VAD, audio is buffered but never transcribed.
     vad = VADProcessor(
@@ -58,12 +69,18 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
 
     # 3. Context & Aggregation (system prompt is in LLM Settings)
     context = LLMContext(tools=tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_mute_strategies=[AlwaysUserMuteStrategy()],
+        ),
+    )
 
     # 4. The Pipeline Definition
-    # Flow: Audio In -> VAD -> STT -> User Agg -> LLM -> TTS -> Output -> Assistant Agg
+    # Flow: Audio In -> STT mute (during bot speech) -> VAD -> STT -> User Agg -> LLM -> TTS -> Output -> Assistant Agg
     pipeline = Pipeline([
         transport.input(),
+        stt_mute,
         vad,
         stt,
         _SttTranscriptionLogger(),
