@@ -152,6 +152,12 @@ class ARITransport(BaseTransport):
             # (e.g. media_connection1), not an IP. Asterisk looks up [section] in websocket_client.conf
             # and uses its uri. Do NOT pass IP:port here—that section won't exist.
             external_host = os.getenv("ARI_MEDIA_CONNECTION", "media_connection1")
+            if ":" in external_host and any(c.isdigit() for c in external_host):
+                logger.warning(
+                    f"ARI_MEDIA_CONNECTION looks like IP:port ({external_host}). "
+                    "Use the websocket_client section name (e.g. media_connection1) instead."
+                )
+                external_host = "media_connection1"
             logger.info(f"Creating WebSocket channel for {incoming_name} (external_host={external_host})")
             await self._ari_send_request("POST", "channels/externalMedia", query_strings=[
                 {"name": "channelId", "value": ws_channel},
