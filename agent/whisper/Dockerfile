@@ -1,8 +1,9 @@
 # Builds whisper.cpp server with CUDA on aarch64 (DGX Spark GB10 / Grace Blackwell).
-# The server exposes /v1/audio/transcriptions (OpenAI-compatible) on port 8080.
+# The server exposes POST /inference on port 8080.
 #
-# SM targets: 90 = Hopper, 100 = Blackwell (GB10). Compiling both lets the binary
-# run unchanged on any NVIDIA GPU in that range.
+# CUDA cmake flag: current whisper.cpp uses -DGGML_CUDA=ON (ggml unified build);
+# -DWHISPER_CUDA=ON is the legacy alias — set both for compatibility.
+# SM targets: 90 = Hopper, 100 = Blackwell (GB10 compute capability 10.0).
 #
 # The model is baked into the image at build time so startup is instant (no
 # first-run download stall that would delay the agent coming up).
@@ -21,7 +22,10 @@ WORKDIR /whisper
 RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp .
 
 # Build only the server binary to keep build times reasonable.
+# -DGGML_CUDA=ON  : current ggml-unified flag (replaces WHISPER_CUDA in recent builds)
+# -DWHISPER_CUDA=ON: kept for older CMakeLists compatibility
 RUN cmake -B build \
+        -DGGML_CUDA=ON \
         -DWHISPER_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="90;100" \
         -DCMAKE_BUILD_TYPE=Release \

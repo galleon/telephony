@@ -42,6 +42,11 @@ services:
     build: ./whisper
     container_name: sentinel-whisper
     restart: unless-stopped
+    environment:
+      # Explicit GPU visibility in addition to deploy.resources (belt-and-suspenders for
+      # NVIDIA container toolkit v2 where only one of the two mechanisms may be active).
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
     ports:
       - "8080:8080"
     deploy:
