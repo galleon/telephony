@@ -20,7 +20,7 @@ from pipecat.frames.frames import TTSSpeakFrame
 from .pipeline import configure_bot
 
 # Spoken once per call via TTS (not LLM) so Piper runs a single clip and context stays one assistant turn.
-_DEFAULT_GREETING = "Hello! How can I help you today?"
+_DEFAULT_GREETING = "IT support, how can I help you?"
 
 
 async def start_agent():

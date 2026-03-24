@@ -1,24 +1,48 @@
 from loguru import logger
 from pipecat.services.llm_service import FunctionCallParams
 
+# Ticket status mock — replace with a real ITSM API call (ServiceNow, Jira, etc.)
+_MOCK_TICKETS = {
+    "INC001": {
+        "status": "In Progress",
+        "priority": "High",
+        "assigned_to": "Alice (Network Team)",
+        "summary": "VPN connection dropping every 30 minutes",
+    },
+    "INC002": {
+        "status": "Resolved",
+        "priority": "Medium",
+        "assigned_to": "Bob (Desktop Support)",
+        "summary": "Outlook not syncing emails",
+    },
+    "INC003": {
+        "status": "Open",
+        "priority": "Critical",
+        "assigned_to": "Unassigned",
+        "summary": "Production database unreachable",
+    },
+}
 
-# 1. Define the actual function logic
-async def fetch_order_status(params: FunctionCallParams):
-    """Handler for getting order status from a DB"""
-    order_id = params.arguments.get("order_id")
-    logger.info(f"Checking status for order: {order_id}")
 
-    # Mock database lookup
-    result = {"order_id": order_id, "status": "Shipped", "delivery_date": "2026-03-25"}
+async def fetch_ticket_status(params: FunctionCallParams):
+    """Look up an IT support ticket by ID."""
+    ticket_id = params.arguments.get("ticket_id", "").strip().upper()
+    logger.info(f"Looking up ticket: {ticket_id}")
 
-    # Send the result back to the LLM so it can answer the user
+    ticket = _MOCK_TICKETS.get(ticket_id)
+    if ticket:
+        result = {"ticket_id": ticket_id, **ticket}
+    else:
+        result = {"ticket_id": ticket_id, "error": "Ticket not found. Please verify the ticket number."}
+
     await params.result_callback(result)
 
 
-async def transfer_to_human(params: FunctionCallParams):
-    """Handler to signal the system to transfer the call"""
+async def escalate_to_engineer(params: FunctionCallParams):
+    """Escalate the call to a human engineer."""
     reason = params.arguments.get("reason", "No reason provided")
-    logger.warning(f"Transferring call. Reason: {reason}")
+    team = params.arguments.get("team", "general")
+    logger.warning(f"Escalating call to {team} team. Reason: {reason}")
 
-    # In a real ARI setup, you'd send a 'sip_call_transfer' frame here
-    await params.result_callback({"status": "transferring", "agent_group": "support"})
+    # In a real ARI setup, bridge the call to the on-call engineer queue.
+    await params.result_callback({"status": "escalating", "queue": f"{team}-oncall"})
