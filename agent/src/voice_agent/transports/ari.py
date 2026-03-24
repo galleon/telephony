@@ -306,8 +306,10 @@ class ARITransport(BaseTransport):
         finally:
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
-            sent = getattr(self._output_proc, "_bytes_sent", 0) if self._output_proc else 0
-            logger.info(f"Media WebSocket disconnected (sent {sent} bytes to Asterisk)")
+            op = self._output_proc
+            sent = getattr(op, "_bytes_sent", 0) if op else 0
+            frames = getattr(op, "_frames_received", 0) if op else 0
+            logger.info(f"Media WebSocket disconnected (received {frames} audio frames, sent {sent} bytes to Asterisk)")
             if "on_client_disconnected" in self._handlers:
                 await self._handlers["on_client_disconnected"](self, ws)
 
@@ -371,6 +373,7 @@ class _ARIOutputProcessor(FrameProcessor):
         self._ulaw_buffer = bytearray()
         self._last_send_time = 0.0
         self._bytes_sent = 0
+        self._frames_received = 0
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -401,15 +404,35 @@ class _ARIOutputProcessor(FrameProcessor):
 
     async def process_frame(self, frame, direction):
         if direction != FrameDirection.DOWNSTREAM:
-            return [frame]
-        if isinstance(frame, OutputAudioRawFrame) and self._ws and self._ws.state == 1:
-            try:
-                pcm = frame.audio
-                sr = getattr(frame, "sample_rate", None) or PIPELINE_SAMPLE_RATE
+            await self.push_frame(frame, direction)
+            return []
+        if not isinstance(frame, OutputAudioRawFrame):
+            await self.push_frame(frame, direction)
+            return []
+        # Diagnostic: log when we receive audio but can't send
+        if not self._ws:
+            logger.debug("ARI output: received OutputAudioRawFrame but _ws is None")
+            await self.push_frame(frame, direction)
+            return []
+        if self._ws.state != 1:
+            logger.debug(f"ARI output: received OutputAudioRawFrame but ws.state={self._ws.state} (need 1=OPEN)")
+            await self.push_frame(frame, direction)
+            return []
+        self._frames_received += 1
+        if self._frames_received == 1:
+            logger.info(f"ARI output: first OutputAudioRawFrame received (size={len(frame.audio)} bytes, sr={getattr(frame, 'sample_rate', '?')})")
+        try:
+            pcm = frame.audio
+            sr = getattr(frame, "sample_rate", None) or PIPELINE_SAMPLE_RATE
+            if len(pcm) == 0:
+                logger.warning("ARI output: received empty audio frame")
+            else:
                 if sr != ULAW_SAMPLE_RATE:
                     pcm, _ = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, None)
                 ulaw = audioop.lin2ulaw(pcm, 2)
                 await self._send_ulaw(ulaw)
-            except Exception:
-                pass
-        return [frame]
+        except Exception as e:
+            logger.exception(f"ARI output: error processing audio frame: {e}")
+        # Forward frame to assistant aggregator
+        await self.push_frame(frame, direction)
+        return []
