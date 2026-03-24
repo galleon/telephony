@@ -134,6 +134,7 @@ The agent must be **running and connected to ARI** before you place a call. Aste
 - Ensure **vLLM is running** on the DGX: `curl http://localhost:8000/v1/models`
 - If vLLM is not running, the LLM step fails silently and no TTS is produced. Start vLLM first, or set `OPENAI_API_KEY` and `VLLM_BASE_URL` to use OpenAI instead.
 - Check agent logs for **"Media WebSocket connected"** and **"Creating bridge"**. If you see neither, Asterisk isn't reaching the agent's media server. Verify `websocket_client.conf` `uri` points to the agent host (DGX IP, or `host.docker.internal`/host IP if agent runs on same Mac).
+- **Echo test to isolate:** Run the [asterisk-websocket-examples](https://github.com/asterisk/asterisk-websocket-examples) `mow_echo_test_server.py` on the DGX (port 8787), point `websocket_client.conf` to it, and use their dialplan to play a test file. If you hear the echo, Asterisk↔WebSocket works and the issue is in our agent. If not, the issue is Asterisk config, RTP, or the phone.
 
 ---
 

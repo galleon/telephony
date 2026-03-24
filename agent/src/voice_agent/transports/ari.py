@@ -250,6 +250,12 @@ class ARITransport(BaseTransport):
                     async for raw in ws:
                         try:
                             msg = json.loads(raw)
+                            if msg.get("type") == "RESTResponse":
+                                resp = msg.get("response") or msg
+                                status = resp.get("status_code")
+                                if status is not None and status >= 400:
+                                    logger.error(f"ARI REST failed: status={status} msg={msg}")
+                                continue
                             if msg.get("type") == "StasisStart":
                                 await self._on_stasis_start(msg)
                             elif msg.get("type") == "StasisEnd":
