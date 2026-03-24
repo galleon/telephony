@@ -1,11 +1,14 @@
+import asyncio
 import os
 
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    FunctionCallsStartedFrame,
     InterimTranscriptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
@@ -28,35 +31,58 @@ _PIPELINE_INPUT_HZ = 16000
 
 
 class _FunctionCallFiller(FrameProcessor):
-    """Speak a short filler phrase the moment the LLM initiates a tool call.
+    """Play a filler phrase shortly after the LLM starts generating, if it hasn't spoken yet.
 
-    Without this, the caller hears silence for the full round-trip:
-      Whisper STT  (~2 s CPU / ~0.3 s GPU)
-    + LLM first pass (tool-call decision, ~2 s)
-    + tool execution
-    + LLM second pass (response generation, ~2 s)
-    + Piper TTS synthesis (~4 s CPU / ~0.2 s GPU)
-    = 4–10 s of dead air.  Callers hang up.
+    When the LLM calls a tool it streams JSON tokens for ~2 s before emitting
+    FunctionCallsStartedFrame. Waiting for that frame leaves the caller in
+    silence long enough to hang up.
 
-    On FunctionCallsStartedFrame we push a TTSSpeakFrame downstream so Piper
-    starts speaking immediately while the LLM waits for the tool result.
-    Configurable via TOOL_CALL_FILLER env var; set to empty string to disable.
+    Strategy: on LLMFullResponseStartFrame, arm a short timer (TOOL_CALL_FILLER_DELAY_S,
+    default 0.5 s). If a LLMTextFrame arrives first the LLM is producing a direct reply
+    and the timer is cancelled. If the timer fires first (no text yet = tool call in
+    progress) the filler is pushed to TTS immediately.
+
+    append_to_context=False keeps the filler out of the LLM message history.
     """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._filler = os.getenv("TOOL_CALL_FILLER", "One moment please.")
+        self._delay = float(os.getenv("TOOL_CALL_FILLER_DELAY_S", "0.5"))
+        self._timer: asyncio.Task | None = None
+
+    def _cancel_timer(self):
+        if self._timer and not self._timer.done():
+            self._timer.cancel()
+        self._timer = None
+
+    async def _fire_after_delay(self):
+        try:
+            await asyncio.sleep(self._delay)
+            await self.push_frame(
+                TTSSpeakFrame(text=self._filler, append_to_context=False),
+                FrameDirection.DOWNSTREAM,
+            )
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._timer = None
 
     async def process_frame(self, frame, direction):
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
-        if (
-            self._filler
-            and direction == FrameDirection.DOWNSTREAM
-            and isinstance(frame, FunctionCallsStartedFrame)
-        ):
-            await self.push_frame(TTSSpeakFrame(text=self._filler), direction)
+        if direction != FrameDirection.DOWNSTREAM:
+            return
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._cancel_timer()
+            if self._filler:
+                self._timer = asyncio.create_task(self._fire_after_delay())
+        elif isinstance(frame, LLMTextFrame):
+            # LLM is producing a direct text reply — no filler needed
+            self._cancel_timer()
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            self._cancel_timer()
 
 
 class _SttTranscriptionLogger(FrameProcessor):
