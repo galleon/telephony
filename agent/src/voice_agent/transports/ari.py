@@ -403,6 +403,9 @@ class _ARIOutputProcessor(FrameProcessor):
                 break
 
     async def process_frame(self, frame, direction):
+        # Must call super() first so base handles StartFrame and sets __started=True.
+        # Otherwise push_frame rejects all frames via _check_started().
+        await super().process_frame(frame, direction)
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return []
