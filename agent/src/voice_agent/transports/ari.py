@@ -276,6 +276,7 @@ class ARITransport(BaseTransport):
 
     async def _process_media(self, ws):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
+        in_chunks = 0
         if self._output_proc:
             self._output_proc._ws = ws
             self._output_proc._buffering_started = False
@@ -284,6 +285,7 @@ class ARITransport(BaseTransport):
             self._output_proc._last_send_time = 0.0
             self._output_proc._bytes_sent = 0
             self._output_proc._pcm_resampler = create_stream_resampler()
+            self._output_proc._prepended_outbound_warmup = False
         # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
@@ -309,6 +311,7 @@ class ARITransport(BaseTransport):
                         continue
                     continue
                 if self._input_proc:
+                    in_chunks += 1
                     pcm = audioop.ulaw2lin(message, 2)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
                         pcm = await in_resampler.resample(
@@ -324,7 +327,15 @@ class ARITransport(BaseTransport):
             op = self._output_proc
             sent = getattr(op, "_bytes_sent", 0) if op else 0
             frames = getattr(op, "_frames_received", 0) if op else 0
-            logger.info(f"Media WebSocket disconnected (received {frames} audio frames, sent {sent} bytes to Asterisk)")
+            logger.info(
+                f"Media WebSocket disconnected (inbound μlaw chunks from Asterisk: {in_chunks}, "
+                f"downstream TTS frames: {frames}, sent {sent} bytes to Asterisk)"
+            )
+            if in_chunks < 25:
+                logger.warning(
+                    "Very few inbound audio chunks from Asterisk — the phone→PBX path may not be sending "
+                    "audio to this WebSocket (RTP, mic, or bridge). STT will not hear the caller."
+                )
             if "on_client_disconnected" in self._handlers:
                 await self._handlers["on_client_disconnected"](self, ws)
 
@@ -377,6 +388,8 @@ class _ARIInputProcessor(FrameProcessor):
 # Asterisk expects 160-byte ulaw frames (20ms at 8kHz) for telephony
 ULAW_FRAME_SIZE = 160
 ULAW_FRAME_MS = 20  # 20ms per frame
+# ~100ms of 8kHz silence (lets RTP/bridge settle; avoids clipped first syllables)
+_ULAW_SILENCE_100MS = audioop.lin2ulaw(b"\x00\x00" * (160 * 5), 2)
 
 
 class _ARIOutputProcessor(FrameProcessor):
@@ -390,8 +403,10 @@ class _ARIOutputProcessor(FrameProcessor):
         self._bytes_sent = 0
         self._frames_received = 0
         self._buffering_started = False
-        # SOXR stream resampler (same stack as Piper); new instance per media session / TTS utterance boundary
+        # SOXR resampler: one per media call only (reset on new WebSocket). Resetting per TTS phrase
+        # re-primes the filter and clips the start of each short utterance (e.g. "Hello!" -> "lo").
         self._pcm_resampler = create_stream_resampler()
+        self._prepended_outbound_warmup = False
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -400,6 +415,9 @@ class _ARIOutputProcessor(FrameProcessor):
         """Send ulaw in 160-byte chunks, paced at 20ms (Asterisk telephony)."""
         if not self._ws or self._ws.state != 1:
             return
+        if not self._prepended_outbound_warmup:
+            self._ulaw_buffer.extend(_ULAW_SILENCE_100MS)
+            self._prepended_outbound_warmup = True
         self._ulaw_buffer.extend(ulaw)
         now = time.monotonic()
         while len(self._ulaw_buffer) >= ULAW_FRAME_SIZE:
@@ -431,7 +449,6 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
-            self._pcm_resampler = create_stream_resampler()
             if self._buffering_started and self._ws and self._ws.state == 1:
                 try:
                     await self._ws.send("STOP_MEDIA_BUFFERING")
