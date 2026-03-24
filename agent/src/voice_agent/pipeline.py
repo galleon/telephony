@@ -3,7 +3,13 @@ import os
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import InterimTranscriptionFrame, StartFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    FunctionCallsStartedFrame,
+    InterimTranscriptionFrame,
+    StartFrame,
+    TranscriptionFrame,
+    TTSSpeakFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -20,6 +26,36 @@ from .transports.ari import ARITransport
 
 # Must match resampled caller audio from ARITransport (8 kHz μ-law → 16 kHz PCM).
 _PIPELINE_INPUT_HZ = 16000
+
+
+class _FunctionCallFiller(FrameProcessor):
+    """Speak a short filler phrase the moment the LLM initiates a tool call.
+
+    Without this, the caller hears silence for the full round-trip:
+      Whisper STT  (~2 s CPU / ~0.3 s GPU)
+    + LLM first pass (tool-call decision, ~2 s)
+    + tool execution
+    + LLM second pass (response generation, ~2 s)
+    + Piper TTS synthesis (~4 s CPU / ~0.2 s GPU)
+    = 4–10 s of dead air.  Callers hang up.
+
+    On FunctionCallsStartedFrame we push a TTSSpeakFrame downstream so Piper
+    starts speaking immediately while the LLM waits for the tool result.
+    Configurable via TOOL_CALL_FILLER env var; set to empty string to disable.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._filler = os.getenv("TOOL_CALL_FILLER", "One moment please.")
+
+    async def process_frame(self, frame, direction):
+        await self.push_frame(frame, direction)
+        if (
+            self._filler
+            and direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, FunctionCallsStartedFrame)
+        ):
+            await self.push_frame(TTSSpeakFrame(text=self._filler), direction)
 
 
 class _SttTranscriptionLogger(FrameProcessor):
@@ -77,7 +113,7 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     )
 
     # 4. The Pipeline Definition
-    # Flow: Audio In -> STT mute (during bot speech) -> VAD -> STT -> User Agg -> LLM -> TTS -> Output -> Assistant Agg
+    # Flow: Audio In -> STT mute -> VAD -> STT -> User Agg -> LLM -> Filler -> TTS -> Output -> Agg
     pipeline = Pipeline(
         [
             transport.input(),
@@ -87,6 +123,7 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
             _SttTranscriptionLogger(),
             user_aggregator,
             llm,
+            _FunctionCallFiller(),
             tts,
             transport.output(),
             assistant_aggregator,
