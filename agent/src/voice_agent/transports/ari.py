@@ -279,6 +279,10 @@ class ARITransport(BaseTransport):
             self._output_proc._ws = ws
             self._output_proc._buffering_started = False
             self._output_proc._frames_received = 0
+            self._output_proc._ulaw_buffer.clear()
+            self._output_proc._last_send_time = 0.0
+            self._output_proc._bytes_sent = 0
+            self._output_proc._ratecv_state = None
         # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
@@ -292,6 +296,7 @@ class ARITransport(BaseTransport):
             await self._handlers["on_client_connected"](self, ws)
         try:
             optimal_frame_size = 160
+            input_ratecv_state = None
             async for message in ws:
                 if isinstance(message, str):
                     if "MEDIA_START" in message:
@@ -305,7 +310,9 @@ class ARITransport(BaseTransport):
                 if self._input_proc:
                     pcm = audioop.ulaw2lin(message, 2)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
-                        pcm, _ = audioop.ratecv(pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, None)
+                        pcm, input_ratecv_state = audioop.ratecv(
+                            pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, input_ratecv_state
+                        )
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
                     await self._input_proc.queue_frame(frame)
         except Exception as e:
@@ -382,6 +389,8 @@ class _ARIOutputProcessor(FrameProcessor):
         self._bytes_sent = 0
         self._frames_received = 0
         self._buffering_started = False
+        # ratecv state must persist across OutputAudioRawFrame chunks (reset on TTS stop / new call)
+        self._ratecv_state = None
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -421,6 +430,7 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
+            self._ratecv_state = None
             if self._buffering_started and self._ws and self._ws.state == 1:
                 try:
                     await self._ws.send("STOP_MEDIA_BUFFERING")
@@ -453,11 +463,17 @@ class _ARIOutputProcessor(FrameProcessor):
         try:
             pcm = frame.audio
             sr = getattr(frame, "sample_rate", None) or PIPELINE_SAMPLE_RATE
+            nch = getattr(frame, "num_channels", None) or 1
             if len(pcm) == 0:
                 logger.warning("ARI output: received empty audio frame")
             else:
+                if nch == 2:
+                    pcm = audioop.tomono(pcm, 2, 0.5, 0.5)
+                    nch = 1
                 if sr != ULAW_SAMPLE_RATE:
-                    pcm, _ = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, None)
+                    pcm, self._ratecv_state = audioop.ratecv(
+                        pcm, 2, nch, sr, ULAW_SAMPLE_RATE, self._ratecv_state
+                    )
                 ulaw = audioop.lin2ulaw(pcm, 2)
                 await self._send_ulaw(ulaw)
         except Exception as e:
