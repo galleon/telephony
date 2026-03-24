@@ -13,7 +13,6 @@ import asyncio
 import audioop
 import time
 import json
-import logging
 import os
 import uuid
 from typing import Optional
@@ -118,6 +117,7 @@ class ARITransport(BaseTransport):
         self._input_proc = None
         self._output_proc = None
         self._handlers = {}
+        self._in_resample_state = None
 
     def event_handler(self, event: str):
         def decorator(fn):
@@ -256,7 +256,7 @@ class ARITransport(BaseTransport):
                             elif msg.get("type") == "Dial":
                                 await self._on_dial(msg)
                         except Exception as e:
-                            logger.error(f"ARI event error: {e}")
+                            logger.exception(f"ARI event error: {e}")
             except Exception as e:
                 logger.warning(f"ARI connection lost: {e}. Reconnecting in {backoff:.0f}s...")
                 await asyncio.sleep(backoff)
@@ -292,11 +292,11 @@ class ARITransport(BaseTransport):
                 if self._input_proc:
                     pcm = audioop.ulaw2lin(message, 2)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
-                        pcm, _ = audioop.ratecv(pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, None)
+                        pcm, self._in_resample_state = audioop.ratecv(pcm, 2, 1, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE, self._in_resample_state)
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
                     await self._input_proc.queue_frame(frame)
         except Exception as e:
-            logger.error(f"Media error: {e}")
+            logger.exception(f"Media error: {e}")
         finally:
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
@@ -368,6 +368,7 @@ class _ARIOutputProcessor(FrameProcessor):
         self._last_send_time = 0.0
         self._bytes_sent = 0
         self._frames_received = 0
+        self._resample_state = None
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -396,7 +397,7 @@ class _ARIOutputProcessor(FrameProcessor):
                 logger.debug("ARI output: WebSocket closed (call ended)")
                 break
             except Exception as e:
-                logger.error(f"ARI output send error: {e}")
+                logger.exception(f"ARI output send error: {e}")
                 break
 
     async def process_frame(self, frame, direction):
@@ -428,7 +429,7 @@ class _ARIOutputProcessor(FrameProcessor):
                 logger.warning("ARI output: received empty audio frame")
             else:
                 if sr != ULAW_SAMPLE_RATE:
-                    pcm, _ = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, None)
+                    pcm, self._resample_state = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, self._resample_state)
                 ulaw = audioop.lin2ulaw(pcm, 2)
                 await self._send_ulaw(ulaw)
         except Exception as e:
