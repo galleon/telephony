@@ -51,7 +51,7 @@ RUN cmake -S /ct2 -B /ct2/build \
 
 # Build the CTranslate2 Python wheel against the freshly installed C++ library.
 RUN CTRANSLATE2_ROOT=/ct2-install \
-    python3.12 -m pip wheel /ct2 --no-build-isolation -w /ct2-wheel
+    python3.12 -m pip wheel /ct2/python --no-build-isolation -w /ct2-wheel
 
 # ─── Stage 2: Agent runtime ───────────────────────────────────────────────────
 FROM nvcr.io/nvidia/cuda:13.1.1-cudnn-runtime-ubuntu24.04
