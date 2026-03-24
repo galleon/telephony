@@ -46,7 +46,7 @@ async def start_agent():
         # Fresh call: clear history so the model greets instead of continuing a prior turn
         llm_context.set_messages([])
         # Brief pause so SIP/RTP bridge is ready before TTS (reduces clipped first syllable)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.35)
         await trans.queue_frame(LLMRunFrame())
 
     async def run_transport():

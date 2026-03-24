@@ -1,9 +1,26 @@
+from loguru import logger
+from pipecat.frames.frames import InterimTranscriptionFrame, StartFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from .services.factory import create_ai_services
 from .transports.ari import ARITransport
+
+
+class _SttTranscriptionLogger(FrameProcessor):
+    """Logs final/interim transcriptions so we can confirm caller audio reaches Whisper."""
+
+    async def process_frame(self, frame, direction):
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, (TranscriptionFrame, InterimTranscriptionFrame)
+        ):
+            logger.info(f"STT {type(frame).__name__}: {frame.text!r}")
+        await self.push_frame(frame, direction)
+        return []
 
 
 def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
@@ -27,6 +44,7 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     pipeline = Pipeline([
         transport.input(),
         stt,
+        _SttTranscriptionLogger(),
         user_aggregator,
         llm,
         tts,

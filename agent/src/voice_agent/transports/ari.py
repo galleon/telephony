@@ -286,6 +286,7 @@ class ARITransport(BaseTransport):
             self._output_proc._bytes_sent = 0
             self._output_proc._pcm_resampler = create_stream_resampler()
             self._output_proc._prepended_outbound_warmup = False
+            self._output_proc._cancel_pending_stop_buffering()
         # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
@@ -322,6 +323,8 @@ class ARITransport(BaseTransport):
         except Exception as e:
             logger.error(f"Media error: {e}")
         finally:
+            if self._output_proc:
+                self._output_proc._cancel_pending_stop_buffering()
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
             op = self._output_proc
@@ -388,8 +391,11 @@ class _ARIInputProcessor(FrameProcessor):
 # Asterisk expects 160-byte ulaw frames (20ms at 8kHz) for telephony
 ULAW_FRAME_SIZE = 160
 ULAW_FRAME_MS = 20  # 20ms per frame
-# ~100ms of 8kHz silence (lets RTP/bridge settle; avoids clipped first syllables)
-_ULAW_SILENCE_100MS = audioop.lin2ulaw(b"\x00\x00" * (160 * 5), 2)
+# ~240ms of 8kHz silence (RTP/bridge + Asterisk buffer; reduces clipped first syllables)
+_ULAW_WARMUP_SILENCE = audioop.lin2ulaw(b"\x00\x00" * (160 * 12), 2)
+# Debounce STOP_MEDIA_BUFFERING so back-to-back Piper phrases ("Hello!" + "How can I help…")
+# stay in one buffer session; immediate STOP/START between phrases clips the next phrase start.
+_STOP_BUFFERING_DEBOUNCE_S = 0.22
 
 
 class _ARIOutputProcessor(FrameProcessor):
@@ -407,16 +413,37 @@ class _ARIOutputProcessor(FrameProcessor):
         # re-primes the filter and clips the start of each short utterance (e.g. "Hello!" -> "lo").
         self._pcm_resampler = create_stream_resampler()
         self._prepended_outbound_warmup = False
+        self._stop_buffering_task: Optional[asyncio.Task] = None
+
+    def _cancel_pending_stop_buffering(self):
+        t = self._stop_buffering_task
+        if t and not t.done():
+            t.cancel()
+        self._stop_buffering_task = None
 
     def set_client_connection(self, ws):
         self._ws = ws
+
+    async def _debounced_stop_media_buffering(self):
+        try:
+            await asyncio.sleep(_STOP_BUFFERING_DEBOUNCE_S)
+            if self._buffering_started and self._ws and self._ws.state == 1:
+                try:
+                    await self._ws.send("STOP_MEDIA_BUFFERING")
+                except (ConnectionClosed, Exception):
+                    pass
+                self._buffering_started = False
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._stop_buffering_task = None
 
     async def _send_ulaw(self, ulaw: bytes):
         """Send ulaw in 160-byte chunks, paced at 20ms (Asterisk telephony)."""
         if not self._ws or self._ws.state != 1:
             return
         if not self._prepended_outbound_warmup:
-            self._ulaw_buffer.extend(_ULAW_SILENCE_100MS)
+            self._ulaw_buffer.extend(_ULAW_WARMUP_SILENCE)
             self._prepended_outbound_warmup = True
         self._ulaw_buffer.extend(ulaw)
         now = time.monotonic()
@@ -449,12 +476,8 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
-            if self._buffering_started and self._ws and self._ws.state == 1:
-                try:
-                    await self._ws.send("STOP_MEDIA_BUFFERING")
-                    self._buffering_started = False
-                except (ConnectionClosed, Exception):
-                    pass
+            self._cancel_pending_stop_buffering()
+            self._stop_buffering_task = asyncio.create_task(self._debounced_stop_media_buffering())
             await self.push_frame(frame, direction)
             return []
         if not isinstance(frame, OutputAudioRawFrame):
@@ -469,6 +492,7 @@ class _ARIOutputProcessor(FrameProcessor):
             logger.debug(f"ARI output: received OutputAudioRawFrame but ws.state={self._ws.state} (need 1=OPEN)")
             await self.push_frame(frame, direction)
             return []
+        self._cancel_pending_stop_buffering()
         self._frames_received += 1
         if self._frames_received == 1:
             logger.info(f"ARI output: first OutputAudioRawFrame received (size={len(frame.audio)} bytes, sr={getattr(frame, 'sample_rate', '?')})")
