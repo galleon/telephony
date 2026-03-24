@@ -86,7 +86,7 @@ RUN uv sync --no-dev
 
 # Replace the CPU ctranslate2 wheel with our CUDA-compiled one.
 COPY --from=ct2-builder /ct2-wheel /tmp/ct2-wheel/
-RUN .venv/bin/pip install --force-reinstall --no-deps /tmp/ct2-wheel/ctranslate2-*.whl \
+RUN uv pip install --python .venv/bin/python --force-reinstall --no-deps /tmp/ct2-wheel/ctranslate2-*.whl \
     && rm -rf /tmp/ct2-wheel
 
 RUN mkdir -p .cache/huggingface .cache/piper
