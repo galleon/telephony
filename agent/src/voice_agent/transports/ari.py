@@ -264,6 +264,11 @@ class ARITransport(BaseTransport):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
         if self._output_proc:
             self._output_proc._ws = ws
+        # Create bridge when media connects (StasisStart for external media may not fire or may use different id)
+        sess = next((s for s in self._sessions.values() if isinstance(s, dict) and s.get("incoming") and not s.get("bridge_id")), None)
+        if sess:
+            logger.info("Creating bridge (media connected)")
+            await self._create_bridge_and_answer(sess)
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
             start = StartFrame(
