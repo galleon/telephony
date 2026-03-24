@@ -33,14 +33,15 @@ RUN pip3 install --break-system-packages pybind11 wheel
 RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/OpenNMT/CTranslate2.git /ct2
 
-# SM 90 = Hopper, SM 100 = Blackwell (GB10 compute capability 10.0).
-# CUDA_ARCH_LIST is CTranslate2's own cmake/cuda.cmake variable; without it the
-# old FindCUDA module auto-detects "common" arches including SM 5.3 which
-# CUDA 13.1 dropped, causing nvcc fatal errors.
+# CUDA_ARCH_LIST is CTranslate2's own cmake/cuda.cmake variable, consumed by
+# cmake 3.28's legacy FindCUDA module which requires dot-notation (e.g. "9.0").
+# "9.0+PTX" compiles native SM 90 kernels and keeps PTX so CUDA JIT-compiles
+# for SM 100 (Blackwell/GB10) at first inference (cached afterward).
+# cmake 3.28 does not know SM 100 by name so native Blackwell code requires
+# a newer cmake; PTX fallback is equivalent for correctness, ~same throughput.
 RUN cmake -S /ct2 -B /ct2/build \
         -DWITH_CUDA=ON \
-        -DCUDA_ARCH_LIST="90;100" \
-        -DCMAKE_CUDA_ARCHITECTURES="90;100" \
+        -DCUDA_ARCH_LIST="9.0+PTX" \
         -DWITH_MKL=OFF \
         -DOPENMP_RUNTIME=COMP \
         -DCMAKE_BUILD_TYPE=Release \
