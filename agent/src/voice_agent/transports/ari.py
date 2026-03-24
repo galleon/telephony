@@ -162,10 +162,14 @@ class ARITransport(BaseTransport):
                 {"name": "encapsulation", "value": "none"},
                 {"name": "format", "value": "ulaw"},
             ])
-        elif "websocket" in app_data:
+        else:
+            # External media channel: StasisStart for channel we created (id == ws_channel).
+            # Asterisk may not set app_data for externally created channels.
             sess = self._sessions.get(ch["id"])
-            if sess:
+            if sess and sess.get("ws_channel") == ch["id"]:
                 sess["ws_channel_name"] = ch.get("name", "")
+                logger.info(f"WebSocket channel {ch.get('name')} in Stasis, creating bridge")
+                await self._create_bridge_and_answer(sess)
 
     async def _on_stasis_end(self, msg):
         ch = msg.get("channel", {})
@@ -191,6 +195,18 @@ class ARITransport(BaseTransport):
     async def _on_channel_destroyed(self, msg):
         pass
 
+    async def _create_bridge_and_answer(self, sess):
+        """Create mixing bridge between phone and media channel, then answer."""
+        if sess.get("bridge_id"):
+            return  # Already bridged (e.g. from Dial event)
+        bridge_id = str(uuid.uuid4())
+        sess["bridge_id"] = bridge_id
+        logger.info(f"Creating bridge {bridge_id} for {sess.get('incoming_name', '?')} <-> {sess.get('ws_channel_name', '?')}")
+        await self._ari_send_request("POST", f"bridges/{bridge_id}?type=mixing")
+        await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['incoming']}")
+        await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['ws_channel']}")
+        await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
+
     async def _on_dial(self, msg):
         chan_name = msg.get("peer", {}).get("name", "")
         if "WebSocket/" not in chan_name:
@@ -198,11 +214,8 @@ class ARITransport(BaseTransport):
         if msg.get("dialstatus") == "ANSWER":
             sess = self._sessions.get(msg["peer"]["id"])
             if sess:
-                sess["bridge_id"] = str(uuid.uuid4())
-                await self._ari_send_request("POST", f"bridges/{sess['bridge_id']}?type=mixing")
-                await self._ari_send_request("POST", f"bridges/{sess['bridge_id']}/addChannel?channel={sess['incoming']}")
-                await self._ari_send_request("POST", f"bridges/{sess['bridge_id']}/addChannel?channel={sess['ws_channel']}")
-                await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
+                logger.info(f"Dial ANSWER for WebSocket channel, creating bridge")
+                await self._create_bridge_and_answer(sess)
 
     async def _ari_send_request(self, method: str, uri: str, query_strings=None):
         if not self._ari_ws or self._ari_ws.state != 1:

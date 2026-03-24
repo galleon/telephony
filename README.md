@@ -115,7 +115,7 @@ Using **Linphone** (or Zoiper):
 
 Register, then dial extension **600** to reach the AI assistant.
 
-**Debug (on Mac):** `docker exec -it pbx-gateway asterisk -rx "ari show sessions"` — you should see an inbound connection for `ai-assistant` when the agent is running.
+**Debug (on Mac):** `docker exec -it pbx-gateway asterisk -rx "ari show websocket sessions"` — you should see an inbound connection for `ai-assistant` when the agent is running. Also: `ari show apps` lists registered apps.
 
 ### Asterisk logging
 - **RTP packet dumps** (very verbose): `rtp set debug on` — turn off with `rtp set debug off` when done.
@@ -126,13 +126,14 @@ Register, then dial extension **600** to reach the AI assistant.
 The agent must be **running and connected to ARI** before you place a call. Asterisk only routes Stasis channels to an app once an ARI client has subscribed.
 
 1. **Start the agent on the DGX** and wait for `Connecting to ARI at ...` in its logs.
-2. **Check connectivity** — from the Mac: `docker exec -it pbx-gateway asterisk -rx "ari show sessions"`. You should see an inbound session for `ai-assistant`. If not, the agent isn't reaching Asterisk.
+2. **Check connectivity** — from the Mac: `docker exec -it pbx-gateway asterisk -rx "ari show websocket sessions"` or `ari show apps`. You should see `ai-assistant` when the agent is connected. If not, the agent isn't reaching Asterisk.
 3. **Verify `MAC_IP`** in `agent/.env` — must be the Mac's IP as reachable from the DGX (e.g. `192.168.1.23`). Port **8088** must be open on the Mac.
 4. **Place the call only after** the agent shows it is connected.
 
 ### No audio on phone
 - Ensure **vLLM is running** on the DGX: `curl http://localhost:8000/v1/models`
 - If vLLM is not running, the LLM step fails silently and no TTS is produced. Start vLLM first, or set `OPENAI_API_KEY` and `VLLM_BASE_URL` to use OpenAI instead.
+- Check agent logs for **"Media WebSocket connected"** and **"Creating bridge"**. If you see neither, Asterisk isn't reaching the agent's media server. Verify `websocket_client.conf` `uri` points to the agent host (DGX IP, or `host.docker.internal`/host IP if agent runs on same Mac).
 
 ---
 
