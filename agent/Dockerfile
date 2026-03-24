@@ -22,14 +22,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git \
         cuda-toolkit-13-1 \
-        python3.12-dev python3.12-venv \
+        python3.12-dev python3.12-venv python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Ensure nvcc is on PATH (NVIDIA base image sets this, but be explicit)
 ENV PATH=/usr/local/cuda/bin:${PATH}
 
-RUN python3.12 -m ensurepip --upgrade \
-    && python3.12 -m pip install --upgrade pip pybind11 wheel
+RUN pip3 install --break-system-packages --upgrade pip pybind11 wheel
 
 RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/OpenNMT/CTranslate2.git /ct2
@@ -47,7 +46,7 @@ RUN cmake -S /ct2 -B /ct2/build \
 
 # Build the CTranslate2 Python wheel against the freshly installed C++ library.
 RUN CTRANSLATE2_ROOT=/ct2-install \
-    python3.12 -m pip wheel /ct2 --no-build-isolation -w /ct2-wheel
+    python3.12 -m pip wheel --break-system-packages /ct2 --no-build-isolation -w /ct2-wheel
 
 # ─── Stage 2: Agent runtime ───────────────────────────────────────────────────
 FROM nvcr.io/nvidia/cuda:13.1.1-cudnn-runtime-ubuntu24.04
@@ -67,8 +66,9 @@ RUN ldconfig
 
 WORKDIR /app
 
-RUN python3.12 -m ensurepip --upgrade \
-    && python3.12 -m pip install --no-cache-dir uv
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --break-system-packages --no-cache-dir uv
 
 COPY pyproject.toml uv.lock* ./
 COPY src/ src/
