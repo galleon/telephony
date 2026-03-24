@@ -19,10 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/usr/local/cuda/bin:${PATH}
-# libcuda.so.1 is provided by the host driver at runtime, not baked into the image.
-# Point the linker at the CUDA stub so the build links successfully; the real
-# driver library is used at runtime via the NVIDIA container runtime mount.
-ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
 WORKDIR /whisper
 
@@ -30,12 +26,20 @@ RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp .
 
 # -DGGML_CUDA=ON  : current ggml-unified flag (replaces WHISPER_CUDA in recent builds)
 # -DWHISPER_CUDA=ON: legacy alias kept for older CMakeLists compatibility
-RUN cmake -B build \
+# libcuda.so.1 is not present in the image — it is mounted from the host driver
+# at runtime by the NVIDIA container runtime. Create a versioned symlink to the
+# CUDA stub library so the linker can resolve transitive driver-API symbols in
+# libggml-cuda.so. The stub is removed after the build so it is never loaded at
+# runtime. -rpath-link tells ld to search the stubs dir for transitive .so deps.
+RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && cmake -B build \
         -DGGML_CUDA=ON \
         -DWHISPER_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="90;100" \
         -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build --target whisper-server -j"$(nproc)"
+        -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/cuda/lib64/stubs -Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
+    && cmake --build build --target whisper-server -j"$(nproc)" \
+    && rm /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 ARG WHISPER_MODEL=small.en
 ENV WHISPER_MODEL=${WHISPER_MODEL}
