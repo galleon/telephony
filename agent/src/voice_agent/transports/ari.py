@@ -347,7 +347,12 @@ class _ARIInputProcessor(FrameProcessor):
         self._params = params
 
     async def process_frame(self, frame, direction):
-        return [frame]
+        # Base FrameProcessor consumes StartFrame (calls __start) without pushing it.
+        # We must explicitly push all frames so they reach downstream and the pipeline runs.
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        return []
 
 
 class _ARIOutputProcessor(FrameProcessor):
