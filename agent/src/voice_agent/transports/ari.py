@@ -32,6 +32,7 @@ try:
     from websockets.asyncio.client import connect as ws_connect
     from websockets.asyncio.server import serve as ws_serve
     from websockets.asyncio.server import basic_auth
+    from websockets.exceptions import ConnectionClosed
 except ImportError:
     raise ImportError(
         "ARI transport requires websockets. Install with: pip install 'pipecat-ai[websocket]'"
@@ -177,8 +178,8 @@ class ARITransport(BaseTransport):
             sess = self._sessions.get(ch["id"])
             if sess and sess.get("ws_channel") == ch["id"]:
                 sess["ws_channel_name"] = ch.get("name", "")
-                logger.info(f"WebSocket channel {ch.get('name')} in Stasis, creating bridge")
-                await self._create_bridge_and_answer(sess)
+                logger.info(f"WebSocket channel {ch.get('name')} in Stasis")
+                # Bridge created on Dial ANSWER per asterisk-websocket-examples
 
     async def _on_stasis_end(self, msg):
         ch = msg.get("channel", {})
@@ -205,19 +206,16 @@ class ARITransport(BaseTransport):
         pass
 
     async def _create_bridge_and_answer(self, sess):
-        """Create mixing bridge between phone and media channel. Answer phone first so it can receive mixed audio."""
+        """Create mixing bridge and add channels. Order per asterisk-websocket-examples: bridge, add both, then answer."""
         if sess.get("bridge_id"):
-            return  # Already bridged (e.g. from Dial event)
-        # Answer the phone channel first so it's ready to receive bridge audio
-        await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
+            return  # Already bridged
         bridge_id = str(uuid.uuid4())
         sess["bridge_id"] = bridge_id
         logger.info(f"Creating bridge {bridge_id} for {sess.get('incoming_name', '?')} <-> {sess.get('ws_channel_name', '?')}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}?type=mixing")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['incoming']}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['ws_channel']}")
-        # Brief delay so Asterisk finishes bridge setup before we send audio
-        await asyncio.sleep(0.3)
+        await self._ari_send_request("POST", f"channels/{sess['incoming']}/answer")
 
     async def _on_dial(self, msg):
         chan_name = msg.get("peer", {}).get("name", "")
@@ -268,14 +266,7 @@ class ARITransport(BaseTransport):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
         if self._output_proc:
             self._output_proc._ws = ws
-        # Create bridge when media connects (StasisStart for external media may not fire or may use different id)
-        pending = [s for s in self._sessions.values() if isinstance(s, dict) and s.get("incoming") and not s.get("bridge_id")]
-        sess = pending[0] if pending else None
-        if sess:
-            logger.info(f"Creating bridge (media connected) for {sess.get('incoming_name')} <-> {sess.get('ws_channel')}")
-            await self._create_bridge_and_answer(sess)
-        else:
-            logger.warning(f"No pending session for bridge: have {len(self._sessions)} sessions")
+        # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
             start = StartFrame(
@@ -401,6 +392,9 @@ class _ARIOutputProcessor(FrameProcessor):
                     logger.info("ARI output: first audio frame sent to Asterisk")
                 self._last_send_time = time.monotonic()
                 now = self._last_send_time
+            except ConnectionClosed:
+                logger.debug("ARI output: WebSocket closed (call ended)")
+                break
             except Exception as e:
                 logger.error(f"ARI output send error: {e}")
                 break
