@@ -17,7 +17,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.audio.vad_processor import VADProcessor
-from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.user_mute import AlwaysUserMuteStrategy
 
@@ -86,12 +85,6 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     # 2. Services: Fetch local Blackwell-optimized models and tool schemas
     stt, llm, tts, tools = create_ai_services()
 
-    # Drop inbound audio while the bot is speaking (phone echo otherwise hits VAD/STT).
-    # BotStarted/BotStoppedSpeakingFrame are broadcast from _ARIOutputProcessor.
-    stt_mute = STTMuteFilter(
-        config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}),
-    )
-
     # WhisperSTTService subclasses SegmentedSTTService: it only runs Whisper after
     # VADUserStoppedSpeakingFrame. Without VAD, audio is buffered but never transcribed.
     vad = VADProcessor(
@@ -115,11 +108,12 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     )
 
     # 4. The Pipeline Definition
-    # Flow: Audio In -> STT mute -> VAD -> STT -> User Agg -> LLM -> Filler -> TTS -> Output -> Agg
+    # Flow: Audio In -> VAD -> STT -> User Agg -> LLM -> Filler -> TTS -> Output -> Agg
+    # Echo muting (drop inbound audio while bot speaks) is handled by AlwaysUserMuteStrategy
+    # on the LLMUserAggregator above — the STTMuteFilter predecessor was deprecated in 0.0.106.
     pipeline = Pipeline(
         [
             transport.input(),
-            stt_mute,
             vad,
             stt,
             _SttTranscriptionLogger(),
