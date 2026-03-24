@@ -6,12 +6,16 @@ set -euo pipefail
 
 MODEL="${WHISPER_MODEL:-small.en}"
 MODEL_FILE="/models/ggml-${MODEL}.bin"
+HF_BASE="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+mkdir -p /models
 
 if [ ! -f "$MODEL_FILE" ]; then
-    echo "[whisper] Downloading model '${MODEL}' to ${MODEL_FILE} ..."
-    mkdir -p /models
-    # The download script writes ggml-<model>.bin to the current directory.
-    cd /models && bash /whisper/models/download-ggml-model.sh "$MODEL"
+    echo "[whisper] Downloading model '${MODEL}' → ${MODEL_FILE} ..."
+    wget -q --show-progress -O "${MODEL_FILE}.tmp" \
+        "${HF_BASE}/ggml-${MODEL}.bin" \
+    && mv "${MODEL_FILE}.tmp" "${MODEL_FILE}" \
+    || { rm -f "${MODEL_FILE}.tmp"; echo "[whisper] Download failed" >&2; exit 1; }
     echo "[whisper] Download complete."
 fi
 

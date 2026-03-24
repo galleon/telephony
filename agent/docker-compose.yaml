@@ -54,11 +54,13 @@ services:
             - driver: nvidia
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      # whisper-server exposes GET /health → {"status":"ok"}
+      # start_period covers first-start model download (~300 MB, can take several minutes).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health 2>/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 120s  # first start downloads the model
+      retries: 6
+      start_period: 360s
     logging:
       driver: "json-file"
       options:
