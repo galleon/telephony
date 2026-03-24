@@ -49,6 +49,8 @@ class _FunctionCallFiller(FrameProcessor):
         self._filler = os.getenv("TOOL_CALL_FILLER", "One moment please.")
 
     async def process_frame(self, frame, direction):
+        if isinstance(frame, StartFrame):
+            await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
         if (
             self._filler
