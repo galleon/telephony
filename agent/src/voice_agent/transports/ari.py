@@ -406,6 +406,23 @@ class _ARIInputProcessor(FrameProcessor):
 # Asterisk expects 160-byte ulaw frames (20ms at 8kHz) for telephony
 ULAW_FRAME_SIZE = 160
 ULAW_FRAME_MS = 20  # 20ms per frame
+
+
+def _ulaw_high_water_bytes() -> int:
+    """Backlog threshold: above this, drain faster than real-time to shrink the queue.
+
+    Piper often pushes TTS faster than 8 kHz playback; strict 20 ms pacing builds a
+    multi-second buffer. If the caller hangs up, unsent bytes are lost — catch-up
+    keeps typical backlog closer to this many ms of audio.
+    """
+    try:
+        ms = float(os.getenv("ARI_ULAW_HIGH_WATER_MS", "280"))
+    except ValueError:
+        ms = 280.0
+    ms = max(float(2 * ULAW_FRAME_MS), ms)
+    return int(8000 * (ms / 1000.0))
+
+
 # ~240ms of 8kHz silence (RTP/bridge + Asterisk buffer; reduces clipped first syllables)
 _ULAW_WARMUP_SILENCE = audioop.lin2ulaw(b"\x00\x00" * (160 * 12), 2)
 # Debounce STOP_MEDIA_BUFFERING so back-to-back Piper phrases ("Hello!" + "How can I help…")
@@ -495,14 +512,19 @@ class _ARIOutputProcessor(FrameProcessor):
             self._stop_buffering_task = None
 
     async def _drain_ulaw_buffer(self):
-        """Send all full 160-byte μ-law frames from the buffer at 20 ms (8 kHz) pace."""
+        """Send full 160-byte μ-law frames; pace at 20 ms unless backlog exceeds high-water."""
         if not self._ws or self._ws.state != 1:
             return
+        high = _ulaw_high_water_bytes()
         now = time.monotonic()
         while len(self._ulaw_buffer) >= ULAW_FRAME_SIZE:
-            elapsed = now - self._last_send_time
-            if self._last_send_time > 0 and elapsed < ULAW_FRAME_MS / 1000:
-                await asyncio.sleep((ULAW_FRAME_MS / 1000) - elapsed)
+            backlog = len(self._ulaw_buffer)
+            if backlog <= high:
+                elapsed = now - self._last_send_time
+                if self._last_send_time > 0 and elapsed < ULAW_FRAME_MS / 1000:
+                    await asyncio.sleep((ULAW_FRAME_MS / 1000) - elapsed)
+            else:
+                await asyncio.sleep(0)
             chunk = bytes(self._ulaw_buffer[:ULAW_FRAME_SIZE])
             del self._ulaw_buffer[:ULAW_FRAME_SIZE]
             try:
