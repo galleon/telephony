@@ -10,11 +10,12 @@ based on asterisk-websocket-examples.
 """
 
 import asyncio
-import audioop
 import json
 import os
 import time
 import uuid
+
+import numpy as np
 
 from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
@@ -41,6 +42,72 @@ except ImportError:
 ULAW_SAMPLE_RATE = 8000
 PIPELINE_SAMPLE_RATE = 16000
 
+# ---------------------------------------------------------------------------
+# G.711 µ-law codec (replaces deprecated audioop, vectorised with numpy for
+# fast execution on aarch64 NEON — audioop is removed in Python 3.13).
+# ---------------------------------------------------------------------------
+
+# 256-entry lookup table for ulaw → linear decode (built once at import).
+def _build_ulaw2lin_table() -> np.ndarray:
+    table = np.zeros(256, dtype=np.int16)
+    for i in range(256):
+        u = (~i) & 0xFF
+        t = ((u & 0x0F) << 3) + 0x84
+        t <<= (u & 0x70) >> 4
+        table[i] = (0x84 - t) if (u & 0x80) else (t - 0x84)
+    return table
+
+
+_ULAW2LIN_TABLE: np.ndarray = _build_ulaw2lin_table()
+
+# Exponent lookup for linear → ulaw encode (Sun/ITU-T G.711 table).
+_G711_EXP_LUT = np.array(
+    [
+        0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    ],
+    dtype=np.int32,
+)
+
+
+def _ulaw2lin(data: bytes) -> bytes:
+    """Decode µ-law bytes → 16-bit signed PCM bytes (vectorised)."""
+    idx = np.frombuffer(data, dtype=np.uint8)
+    return _ULAW2LIN_TABLE[idx].tobytes()
+
+
+def _lin2ulaw(data: bytes) -> bytes:
+    """Encode 16-bit signed PCM bytes → µ-law bytes (vectorised)."""
+    CLIP = 32635
+    BIAS = 0x84
+    s = np.frombuffer(data, dtype=np.int16).astype(np.int32)
+    sign = np.where(s < 0, 0x80, 0).astype(np.int32)
+    s = np.minimum(np.abs(s), CLIP) + BIAS
+    exp = _G711_EXP_LUT[(s >> 7) & 0xFF]
+    mantissa = (s >> (exp + 3)) & 0x0F
+    return (~(sign | (exp << 4) | mantissa)).astype(np.uint8).tobytes()
+
+
+def _tomono(data: bytes) -> bytes:
+    """Stereo interleaved 16-bit PCM → mono by averaging both channels."""
+    stereo = np.frombuffer(data, dtype=np.int16).reshape(-1, 2).astype(np.int32)
+    mono = np.clip((stereo[:, 0] + stereo[:, 1] + 1) >> 1, -32768, 32767).astype(np.int16)
+    return mono.tobytes()
+
 
 class ARIMediaBridge(FrameProcessor):
     """Bridges Asterisk Media WebSocket (µlaw) to Pipecat pipeline (PCM)."""
@@ -60,7 +127,7 @@ class ARIMediaBridge(FrameProcessor):
         if self._role == "output" and isinstance(frame, OutputAudioRawFrame):
             # PCM → µlaw, send to Asterisk
             try:
-                ulaw = audioop.lin2ulaw(frame.audio, 2)
+                ulaw = _lin2ulaw(frame.audio)
                 await self._ws.send(ulaw)
             except Exception as e:
                 logger.error(f"ARI output error: {e}")
@@ -319,7 +386,7 @@ class ARITransport(BaseTransport):
                     continue
                 if self._input_proc:
                     in_chunks += 1
-                    pcm = audioop.ulaw2lin(message, 2)
+                    pcm = _ulaw2lin(message)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
                         pcm = await in_resampler.resample(pcm, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE)
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
@@ -423,8 +490,9 @@ def _ulaw_high_water_bytes() -> int:
     return int(8000 * (ms / 1000.0))
 
 
-# ~240ms of 8kHz silence (RTP/bridge + Asterisk buffer; reduces clipped first syllables)
-_ULAW_WARMUP_SILENCE = audioop.lin2ulaw(b"\x00\x00" * (160 * 12), 2)
+# ~240ms of 8kHz silence (RTP/bridge + Asterisk buffer; reduces clipped first syllables).
+# µ-law encodes 0 PCM as 0xFF — build directly without PCM round-trip.
+_ULAW_WARMUP_SILENCE = bytes([0xFF] * (ULAW_FRAME_SIZE * 12))
 # Debounce STOP_MEDIA_BUFFERING so back-to-back Piper phrases ("Hello!" + "How can I help…")
 # stay in one buffer session; immediate STOP/START between phrases clips the next phrase start.
 _STOP_BUFFERING_DEBOUNCE_S = 0.22
@@ -554,8 +622,7 @@ class _ARIOutputProcessor(FrameProcessor):
         if rem == 0:
             return
         pad_samples = ULAW_FRAME_SIZE - rem
-        silence_pcm = b"\x00\x00" * pad_samples
-        self._ulaw_buffer.extend(audioop.lin2ulaw(silence_pcm, 2))
+        self._ulaw_buffer.extend(bytes([0xFF] * pad_samples))  # µ-law silence = 0xFF
         await self._drain_ulaw_buffer()
 
     async def _send_ulaw(self, ulaw: bytes):
@@ -618,11 +685,11 @@ class _ARIOutputProcessor(FrameProcessor):
                 logger.warning("ARI output: received empty audio frame")
             else:
                 if nch == 2:
-                    pcm = audioop.tomono(pcm, 2, 0.5, 0.5)
+                    pcm = _tomono(pcm)
                     nch = 1
                 if sr != ULAW_SAMPLE_RATE:
                     pcm = await self._pcm_resampler.resample(pcm, sr, ULAW_SAMPLE_RATE)
-                ulaw = audioop.lin2ulaw(pcm, 2)
+                ulaw = _lin2ulaw(pcm)
                 await self._send_ulaw(ulaw)
         except Exception as e:
             logger.exception(f"ARI output: error processing audio frame: {e}")
