@@ -8,7 +8,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
 
-from ..tools.handlers import fetch_order_status, transfer_to_human
+from ..tools.handlers import escalate_to_engineer, fetch_ticket_status
 
 
 def create_ai_services():
@@ -40,18 +40,39 @@ def create_ai_services():
             raise
 
     # 2. Define the tool schemas
-    order_tool = FunctionSchema(
-        name="get_order_status",
-        description="Get the shipping status and delivery date for a specific order ID.",
-        properties={"order_id": {"type": "string", "description": "The 6-digit order number (e.g. 123456)"}},
-        required=["order_id"],
+    ticket_tool = FunctionSchema(
+        name="get_ticket_status",
+        description=(
+            "Look up the current status of an IT support ticket by its ticket ID. "
+            "Use this when the caller provides a ticket number (e.g. INC001, INC123)."
+        ),
+        properties={
+            "ticket_id": {
+                "type": "string",
+                "description": "The incident or ticket ID (e.g. INC001). Normalise to uppercase.",
+            }
+        },
+        required=["ticket_id"],
     )
 
-    transfer_tool = FunctionSchema(
-        name="transfer_to_support",
-        description="Transfer the caller to a human support agent if you cannot help them.",
-        properties={"reason": {"type": "string", "description": "Short summary of why the user needs a human"}},
-        required=[],  # reason is optional
+    escalate_tool = FunctionSchema(
+        name="escalate_to_engineer",
+        description=(
+            "Escalate the call to a human engineer when the issue is too complex, "
+            "requires hands-on access, or the caller explicitly asks to speak to someone."
+        ),
+        properties={
+            "reason": {
+                "type": "string",
+                "description": "Brief description of the issue requiring escalation.",
+            },
+            "team": {
+                "type": "string",
+                "description": "Target team: 'network', 'desktop', 'security', 'database', or 'general'.",
+                "enum": ["network", "desktop", "security", "database", "general"],
+            },
+        },
+        required=["reason"],
     )
 
     # 3. LLM: vLLM with OpenAI-compatible API
@@ -64,17 +85,18 @@ def create_ai_services():
         settings=OpenAILLMService.Settings(
             model=llm_model,
             system_instruction=(
-                "You are a helpful phone assistant for our company. "
-                "The caller has already heard a spoken greeting; "
-                "do not repeat hello or ask how you can help unless they seem confused. "
-                "Do not ask for an order number or use tools until the caller has spoken. "
-                "Keep replies concise for phone audio. "
-                "Use tools only when the caller gives an order number or asks for status/transfer."
+                "You are an IT support phone assistant. "
+                "The caller has already heard a greeting; do not repeat it. "
+                "Help with ticket status, troubleshooting steps, and escalations. "
+                "Keep replies concise — this is a phone call, not a chat window. "
+                "Do not look up a ticket until the caller gives you a ticket ID. "
+                "If the issue needs hands-on work or the caller asks for a human, escalate. "
+                "When troubleshooting, ask one clarifying question at a time."
             ),
         ),
     )
-    llm.register_function("get_order_status", fetch_order_status)
-    llm.register_function("transfer_to_support", transfer_to_human)
+    llm.register_function("get_ticket_status", fetch_ticket_status)
+    llm.register_function("escalate_to_engineer", escalate_to_engineer)
 
     # 4. TTS: Local Piper (CUDA on DGX Spark)
     # Persist Piper voice in cache dir (mounted volume in Docker)
@@ -101,5 +123,5 @@ def create_ai_services():
     else:
         logger.info(f"TTS  | Piper voice={piper_voice!r}  cuda={_using_cuda}  cache={piper_cache}")
 
-    tools = ToolsSchema(standard_tools=[order_tool, transfer_tool])
+    tools = ToolsSchema(standard_tools=[ticket_tool, escalate_tool])
     return stt, llm, tts, tools
