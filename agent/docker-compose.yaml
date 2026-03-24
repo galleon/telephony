@@ -1,10 +1,10 @@
 # Run on DGX Spark. Starts vLLM + voice agent.
-# Prereqs: .env with MAC_IP, ARI_USER, ARI_PASS; websocket_client.conf points to this host.
+# Prereqs: .env with ASTERISK_IP, ARI_USER, ARI_PASS; websocket_client.conf points to this host.
 #
 # Usage:
 #   cd agent && docker compose up -d
 #
-# Asterisk (on Mac) must be running first. Start order: 1) Asterisk, 2) this compose.
+# Asterisk (Mac or Linux) must be running first. Start order: 1) Asterisk, 2) this compose.
 
 volumes:
   vllm_cache:

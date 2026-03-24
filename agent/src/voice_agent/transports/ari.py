@@ -202,6 +202,7 @@ class ARITransport(BaseTransport):
         if sess and sess.get("bridge_id"):
             await self._ari_send_request("DELETE", f"bridges/{sess['bridge_id']}")
             sess["bridge_id"] = None
+        # Channel/bridge DELETE can 404 if Asterisk already destroyed them (caller hung up)
 
     async def _on_channel_destroyed(self, msg):
         pass
@@ -253,8 +254,13 @@ class ARITransport(BaseTransport):
                             if msg.get("type") == "RESTResponse":
                                 resp = msg.get("response") or msg
                                 status = resp.get("status_code")
+                                uri = resp.get("uri", "")
                                 if status is not None and status >= 400:
-                                    logger.error(f"ARI REST failed: status={status} msg={msg}")
+                                    # 404 on channel/bridge DELETE is expected when caller hung up
+                                    if status == 404 and ("channels/" in uri or "bridges/" in uri):
+                                        logger.debug(f"ARI 404 on cleanup (channel/bridge already gone): {uri}")
+                                    else:
+                                        logger.error(f"ARI REST failed: status={status} uri={uri} msg={msg}")
                                 continue
                             if msg.get("type") == "StasisStart":
                                 await self._on_stasis_start(msg)

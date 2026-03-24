@@ -34,7 +34,7 @@ telephony/
     ├── pyproject.toml       # Managed by uv
     ├── uv.lock              # Deterministic dependencies
     ├── .env.example         # Template (copy to .env on DGX Spark)
-    ├── .env                 # Secrets — set MAC_IP to Mac's address
+    ├── .env                 # Secrets — set ASTERISK_IP to Asterisk host's address
     └── src/
         └── voice_agent/     # Namespaced source package
             ├── main.py      # Entrypoint & runner
@@ -48,16 +48,19 @@ telephony/
 ## 🚀 Quick Start
 
 ### 1. Gateway Setup (Mac)
-Ensure your `config/` folder contains the required `.conf` files, then launch the gateway:
-```bash
-docker compose up -d
-```
+
+**Option A – Docker (default):** `docker compose up -d`
+
+**Option B – Native Asterisk (recommended if using Telephone on same Mac):** See [docs/native-asterisk-mac.md](docs/native-asterisk-mac.md). Fixes RTP when the SIP client runs on the Mac.
+
+For Docker: ensure `config/` has the required `.conf` files, then `docker compose up -d`.
+
 *Verify with:* `curl -v -u ai_user:your_password http://localhost:8088/ari/asterisk/info`
 
 ### 2. Inference Engine Setup (DGX Spark only)
 **Run these commands on the DGX Spark machine—not on the Mac.** The agent must run on DGX Spark for GPU-accelerated STT/LLM/TTS.
 
-Copy `agent/.env.example` to `agent/.env` and set `MAC_IP` to your Mac's IP.
+Copy `agent/.env.example` to `agent/.env` and set `ASTERISK_IP` to your Asterisk host's IP.
 
 **Option A — Docker Compose (recommended)**  
 Starts vLLM + agent in one go:
@@ -89,7 +92,7 @@ You should see: `Connecting to ARI at ...` and `Starting Media server on 0.0.0.0
 Environment variables in `agent/.env` (on the DGX Spark):
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAC_IP` | `192.168.1.23` | IP of the Mac running Asterisk (agent connects to this) |
+| `ASTERISK_IP` | `192.168.1.23` | IP of the host running Asterisk (agent connects to this) |
 | `ARI_USER` / `ARI_PASS` | — | ARI credentials for the Mac gateway |
 | `VLLM_BASE_URL` | `http://localhost:8000/v1` | vLLM API (overridden to `http://vllm:8000/v1` in docker-compose) |
 | `LLM_MODEL` | `Qwen2.5-7B-Instruct` | Model name (must match vLLM `--served-model-name`) |
@@ -108,7 +111,7 @@ Using **Linphone** (or Zoiper):
 
 | Setting   | Value                         |
 |-----------|-------------------------------|
-| Server    | `MAC_IP` (e.g. 192.168.1.23)  |
+| Server    | `ASTERISK_IP` (e.g. 192.168.1.23)  |
 | Port      | 5060                          |
 | Username  | 6001                          |
 | Password  | password123                   |
@@ -127,14 +130,14 @@ The agent must be **running and connected to ARI** before you place a call. Aste
 
 1. **Start the agent on the DGX** and wait for `Connecting to ARI at ...` in its logs.
 2. **Check connectivity** — from the Mac: `docker exec -it pbx-gateway asterisk -rx "ari show websocket sessions"` or `ari show apps`. You should see `ai-assistant` when the agent is connected. If not, the agent isn't reaching Asterisk.
-3. **Verify `MAC_IP`** in `agent/.env` — must be the Mac's IP as reachable from the DGX (e.g. `192.168.1.23`). Port **8088** must be open on the Mac.
+3. **Verify `ASTERISK_IP`** in `agent/.env` — must be the Asterisk host's IP as reachable from the DGX (e.g. `192.168.1.23`). Port **8088** must be open on the Mac.
 4. **Place the call only after** the agent shows it is connected.
 
 ### No audio on phone
 - Ensure **vLLM is running** on the DGX: `curl http://localhost:8000/v1/models`
 - If vLLM is not running, the LLM step fails silently and no TTS is produced. Start vLLM first, or set `OPENAI_API_KEY` and `VLLM_BASE_URL` to use OpenAI instead.
 - Check agent logs for **"Media WebSocket connected"** and **"Creating bridge"**. If you see neither, Asterisk isn't reaching the agent's media server. Verify `websocket_client.conf` `uri` points to the agent host (DGX IP, or `host.docker.internal`/host IP if agent runs on same Mac).
-- **Echo test to isolate:** Run the [asterisk-websocket-examples](https://github.com/asterisk/asterisk-websocket-examples) `mow_echo_test_server.py` on the DGX (port 8787), point `websocket_client.conf` to it, and use their dialplan to play a test file. If you hear the echo, Asterisk↔WebSocket works and the issue is in our agent. If not, the issue is Asterisk config, RTP, or the phone.
+- **Echo test to isolate:** See [docs/echo-test.md](docs/echo-test.md) for step-by-step instructions. Run `mow_echo_test_server.py` on the DGX, point `websocket_client.conf` to it, and dial 601. If you hear the test clip, Asterisk↔WebSocket works and the issue is in our agent.
 
 ---
 

@@ -20,15 +20,15 @@ from pipecat.frames.frames import LLMRunFrame
 from .pipeline import configure_bot
 
 async def start_agent():
-    # Load settings from .env (agent runs on DGX Spark; MAC_IP = Mac running Asterisk)
-    MAC_IP = os.getenv("MAC_IP", "192.168.1.23")
+    # Load settings from .env (agent runs on DGX; ASTERISK_IP = host running Asterisk)
+    ASTERISK_IP = os.getenv("ASTERISK_IP") or os.getenv("MAC_IP", "192.168.1.23")
     ARI_USER = os.getenv("ARI_USER", "ai_user")
     ARI_PASS = os.getenv("ARI_PASS", "your_password")
 
     base_url = os.getenv("SPARK_IP") or os.getenv("DGX_IP") or os.getenv("AGENT_HOST")
-    pipeline, transport = configure_bot(MAC_IP, ARI_USER, ARI_PASS, base_url=base_url)
+    pipeline, transport = configure_bot(ASTERISK_IP, ARI_USER, ARI_PASS, base_url=base_url)
 
-    logger.info(f"🚀 AI Agent starting. Listening for calls from {MAC_IP}...")
+    logger.info(f"🚀 AI Agent starting. Listening for calls from {ASTERISK_IP}...")
     from pipecat.pipeline.runner import PipelineRunner
     from pipecat.pipeline.task import PipelineTask
 

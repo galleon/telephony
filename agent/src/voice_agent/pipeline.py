@@ -8,11 +8,11 @@ from .services.factory import create_ai_services
 from .transports.ari import ARITransport
 
 
-def configure_bot(mac_ip: str, ari_user: str, ari_pass: str, base_url: Optional[str] = None):
-    # 1. Transport: ARI client (connects to Mac) + Media server (Asterisk connects to DGX)
+def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str, base_url: Optional[str] = None):
+    # 1. Transport: ARI client (connects to Asterisk) + Media server (Asterisk connects to DGX)
     # base_url = Spark/DGX IP so Asterisk knows where to send audio (e.g. http://192.168.1.50)
     transport = ARITransport(
-        uri=f"http://{mac_ip}:8088",
+        uri=f"http://{asterisk_ip}:8088",
         username=ari_user,
         password=ari_pass,
         app_name="ai-assistant",

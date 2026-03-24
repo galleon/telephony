@@ -1,5 +1,6 @@
 # Runtime / generated
 logs/
+config/asterisk.conf.generated
 .env
 agent/.env
 *.pyc
