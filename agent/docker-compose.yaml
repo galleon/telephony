@@ -8,7 +8,8 @@
 
 volumes:
   vllm_cache:
-  agent_model_cache:  # Whisper + Piper models persist across restarts
+  agent_model_cache:  # Piper models persist across restarts
+  whisper_model_cache:  # whisper.cpp GGML models persist across rebuilds
 
 x-vllm: &vllm
   image: nvcr.io/nvidia/vllm:26.02-py3
@@ -36,6 +37,34 @@ x-vllm: &vllm
     start_period: 300s
 
 services:
+  whisper:
+    build: ./whisper
+    container_name: sentinel-whisper
+    restart: unless-stopped
+    environment:
+      - WHISPER_MODEL=${WHISPER_CPP_MODEL:-small.en}
+    volumes:
+      - whisper_model_cache:/models
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s  # first start downloads the model
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   vllm:
     <<: *vllm
     container_name: sentinel-vllm
@@ -69,11 +98,14 @@ services:
     depends_on:
       vllm:
         condition: service_healthy
+      whisper:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - VLLM_BASE_URL=http://vllm:8000/v1
       - LLM_MODEL=Qwen2.5-7B-Instruct
+      - WHISPER_API_URL=http://whisper:8080/v1
       - HF_HOME=/app/.cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/.cache/huggingface
     volumes:

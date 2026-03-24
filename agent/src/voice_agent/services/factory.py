@@ -5,6 +5,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
 
@@ -12,32 +13,43 @@ from ..tools.handlers import escalate_to_engineer, fetch_ticket_status
 
 
 def create_ai_services():
-    # 1. STT: Local Whisper — try CUDA first, fall back to CPU (aarch64 CTranslate2 wheels are CPU-only)
-    device = os.getenv("WHISPER_DEVICE", "cuda")
-    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+    # 1. STT
+    # If WHISPER_API_URL is set, use the remote whisper.cpp server (CUDA on DGX Spark).
+    # Otherwise fall back to local CTranslate2 Whisper on CPU (aarch64 PyPI wheels are CPU-only).
     whisper_model = os.getenv("WHISPER_MODEL", "base")
-    try:
-        stt = WhisperSTTService(
-            device=device,
-            compute_type=compute_type,
-            settings=WhisperSTTService.Settings(model=whisper_model),
+    whisper_api_url = os.getenv("WHISPER_API_URL", "")
+    if whisper_api_url:
+        stt = OpenAISTTService(
+            api_key="local",
+            base_url=whisper_api_url,
+            settings=OpenAISTTService.Settings(model="whisper-1"),
         )
-        logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}")
-    except ValueError as e:
-        if "CUDA" in str(e):
-            logger.warning(
-                f"Whisper CUDA unavailable ({e}). Falling back to CPU. "
-                "On aarch64/DGX Spark, CTranslate2 PyPI wheels are CPU-only; build from source for GPU."
-            )
-            device, compute_type = "cpu", "int8"
+        logger.info(f"STT  | whisper.cpp server={whisper_api_url}  model={whisper_model!r} (GPU via CUDA)")
+    else:
+        device = os.getenv("WHISPER_DEVICE", "cuda")
+        compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+        try:
             stt = WhisperSTTService(
                 device=device,
                 compute_type=compute_type,
                 settings=WhisperSTTService.Settings(model=whisper_model),
             )
-            logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}  (CPU fallback)")
-        else:
-            raise
+            logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}")
+        except ValueError as e:
+            if "CUDA" in str(e):
+                logger.warning(
+                    f"Whisper CUDA unavailable ({e}). Falling back to CPU. "
+                    "On aarch64/DGX Spark, CTranslate2 PyPI wheels are CPU-only; build from source for GPU."
+                )
+                device, compute_type = "cpu", "int8"
+                stt = WhisperSTTService(
+                    device=device,
+                    compute_type=compute_type,
+                    settings=WhisperSTTService.Settings(model=whisper_model),
+                )
+                logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}  (CPU fallback)")
+            else:
+                raise
 
     # 2. Define the tool schemas
     ticket_tool = FunctionSchema(
