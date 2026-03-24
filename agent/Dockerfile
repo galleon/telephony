@@ -13,7 +13,7 @@
 # CPU for now. Step 2 will address TTS (onnxruntime from source or Kokoro).
 
 # ─── Stage 1: Build CTranslate2 with CUDA ─────────────────────────────────────
-FROM nvcr.io/nvidia/cuda:12.8.0-devel-ubuntu22.04 AS ct2-builder
+FROM nvcr.io/nvidia/cuda:13.1.0-devel-ubuntu22.04 AS ct2-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -45,7 +45,7 @@ RUN CTRANSLATE2_ROOT=/ct2-install \
     python3.11 -m pip wheel /ct2 --no-build-isolation -w /ct2-wheel
 
 # ─── Stage 2: Agent runtime ───────────────────────────────────────────────────
-FROM nvcr.io/nvidia/cuda:12.8.0-runtime-ubuntu22.04
+FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 

@@ -9,7 +9,7 @@
 # first-run download stall that would delay the agent coming up).
 # Override WHISPER_MODEL build arg to bake a different model.
 
-FROM nvcr.io/nvidia/cuda:12.8.0-devel-ubuntu22.04
+FROM nvcr.io/nvidia/cuda:13.1.0-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
