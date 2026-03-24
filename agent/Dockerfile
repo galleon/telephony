@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Ensure nvcc is on PATH (NVIDIA base image sets this, but be explicit)
 ENV PATH=/usr/local/cuda/bin:${PATH}
 
-RUN pip3 install --break-system-packages --upgrade pip pybind11 wheel
+RUN pip3 install --break-system-packages pybind11 wheel
 
 RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/OpenNMT/CTranslate2.git /ct2
