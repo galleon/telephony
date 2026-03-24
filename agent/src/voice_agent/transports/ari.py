@@ -11,6 +11,7 @@ based on asterisk-websocket-examples.
 
 import asyncio
 import audioop
+import time
 import json
 import logging
 import os
@@ -305,7 +306,8 @@ class ARITransport(BaseTransport):
         finally:
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
-            logger.info("Media WebSocket disconnected")
+            sent = getattr(self._output_proc, "_bytes_sent", 0) if self._output_proc else 0
+            logger.info(f"Media WebSocket disconnected (sent {sent} bytes to Asterisk)")
             if "on_client_disconnected" in self._handlers:
                 await self._handlers["on_client_disconnected"](self, ws)
 
@@ -355,15 +357,47 @@ class _ARIInputProcessor(FrameProcessor):
         return []
 
 
+# Asterisk expects 160-byte ulaw frames (20ms at 8kHz) for telephony
+ULAW_FRAME_SIZE = 160
+ULAW_FRAME_MS = 20  # 20ms per frame
+
+
 class _ARIOutputProcessor(FrameProcessor):
     def __init__(self, transport: ARITransport, params: TransportParams, **kwargs):
         super().__init__(**kwargs)
         self._transport = transport
         self._params = params
         self._ws = None
+        self._ulaw_buffer = bytearray()
+        self._last_send_time = 0.0
+        self._bytes_sent = 0
 
     def set_client_connection(self, ws):
         self._ws = ws
+
+    async def _send_ulaw(self, ulaw: bytes):
+        """Send ulaw in 160-byte chunks, paced at 20ms (Asterisk telephony)."""
+        if not self._ws or self._ws.state != 1:
+            return
+        self._ulaw_buffer.extend(ulaw)
+        now = time.monotonic()
+        while len(self._ulaw_buffer) >= ULAW_FRAME_SIZE:
+            # Pace sends at 20ms to match Asterisk's expectation
+            elapsed = now - self._last_send_time
+            if self._last_send_time > 0 and elapsed < ULAW_FRAME_MS / 1000:
+                await asyncio.sleep((ULAW_FRAME_MS / 1000) - elapsed)
+            chunk = bytes(self._ulaw_buffer[:ULAW_FRAME_SIZE])
+            del self._ulaw_buffer[:ULAW_FRAME_SIZE]
+            try:
+                await self._ws.send(chunk)
+                self._bytes_sent += len(chunk)
+                if self._bytes_sent == ULAW_FRAME_SIZE:
+                    logger.info("ARI output: first audio frame sent to Asterisk")
+                self._last_send_time = time.monotonic()
+                now = self._last_send_time
+            except Exception as e:
+                logger.error(f"ARI output send error: {e}")
+                break
 
     async def process_frame(self, frame, direction):
         if direction != FrameDirection.DOWNSTREAM:
@@ -375,7 +409,7 @@ class _ARIOutputProcessor(FrameProcessor):
                 if sr != ULAW_SAMPLE_RATE:
                     pcm, _ = audioop.ratecv(pcm, 2, 1, sr, ULAW_SAMPLE_RATE, None)
                 ulaw = audioop.lin2ulaw(pcm, 2)
-                await self._ws.send(ulaw)
+                await self._send_ulaw(ulaw)
             except Exception:
                 pass
         return [frame]
