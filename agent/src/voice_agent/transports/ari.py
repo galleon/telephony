@@ -16,7 +16,6 @@ import time
 import uuid
 
 import numpy as np
-
 from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (

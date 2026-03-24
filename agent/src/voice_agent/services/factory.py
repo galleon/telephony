@@ -45,7 +45,10 @@ def create_ai_services():
                     compute_type=compute_type,
                     settings=WhisperSTTService.Settings(model=whisper_model),
                 )
-                logger.info(f"STT  | Whisper model={whisper_model!r}  device={device}  compute={compute_type}  (CPU fallback)")
+                logger.info(
+                    f"STT  | Whisper model={whisper_model!r}  device={device}"
+                    f"  compute={compute_type}  (CPU fallback)"
+                )
             else:
                 raise
 

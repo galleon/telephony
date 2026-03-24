@@ -3,9 +3,24 @@ from pipecat.services.llm_service import FunctionCallParams
 
 # Ticket status mock — replace with a real ITSM API call (ServiceNow, Jira, etc.)
 _MOCK_TICKETS = {
-    "INC001": {"status": "In Progress", "priority": "High", "assigned_to": "Alice (Network Team)", "summary": "VPN connection dropping every 30 minutes"},
-    "INC002": {"status": "Resolved", "priority": "Medium", "assigned_to": "Bob (Desktop Support)", "summary": "Outlook not syncing emails"},
-    "INC003": {"status": "Open", "priority": "Critical", "assigned_to": "Unassigned", "summary": "Production database unreachable"},
+    "INC001": {
+        "status": "In Progress",
+        "priority": "High",
+        "assigned_to": "Alice (Network Team)",
+        "summary": "VPN connection dropping every 30 minutes",
+    },
+    "INC002": {
+        "status": "Resolved",
+        "priority": "Medium",
+        "assigned_to": "Bob (Desktop Support)",
+        "summary": "Outlook not syncing emails",
+    },
+    "INC003": {
+        "status": "Open",
+        "priority": "Critical",
+        "assigned_to": "Unassigned",
+        "summary": "Production database unreachable",
+    },
 }
 
 

@@ -24,13 +24,13 @@ from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.user_mute import AlwaysUserMuteStrategy
 
+from .services.factory import create_ai_services
+from .transports.ari import ARITransport
+
 # Whisper artifacts — square-bracket tags that contain no real speech.
 # If the transcription is *only* these tags (nothing else after stripping them),
 # drop the frame so the LLM never sees the noise.
 _ARTIFACT_RE = re.compile(r"\[[^\]]*\]")
-
-from .services.factory import create_ai_services
-from .transports.ari import ARITransport
 
 # Must match resampled caller audio from ARITransport (8 kHz μ-law → 16 kHz PCM).
 _PIPELINE_INPUT_HZ = 16000

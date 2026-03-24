@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 
 import httpx
 from openai.types.audio import Transcription
-
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService
 
 
