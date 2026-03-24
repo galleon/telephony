@@ -5,26 +5,24 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.services.whisper.stt import WhisperSTTService
 
 from ..tools.handlers import escalate_to_engineer, fetch_ticket_status
+from .whisper_cpp_stt import WhisperCppSTTService
 
 
 def create_ai_services():
     # 1. STT
     # If WHISPER_API_URL is set, use the remote whisper.cpp server (CUDA on DGX Spark).
+    # whisper.cpp exposes POST /inference; WhisperCppSTTService wraps it with the same
+    # VAD-triggered batching as the local CTranslate2 path.
     # Otherwise fall back to local CTranslate2 Whisper on CPU (aarch64 PyPI wheels are CPU-only).
     whisper_model = os.getenv("WHISPER_MODEL", "base")
     whisper_api_url = os.getenv("WHISPER_API_URL", "")
     if whisper_api_url:
-        stt = OpenAISTTService(
-            api_key="local",
-            base_url=whisper_api_url,
-            settings=OpenAISTTService.Settings(model="whisper-1"),
-        )
-        logger.info(f"STT  | whisper.cpp server={whisper_api_url}  model={whisper_model!r} (GPU via CUDA)")
+        stt = WhisperCppSTTService(server_url=whisper_api_url)
+        logger.info(f"STT  | whisper.cpp /inference  server={whisper_api_url}")
     else:
         device = os.getenv("WHISPER_DEVICE", "cuda")
         compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
