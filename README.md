@@ -120,6 +120,9 @@ Register, then dial extension **600** to reach the AI assistant.
 
 **Debug (on Mac):** `docker exec -it pbx-gateway asterisk -rx "ari show websocket sessions"` — you should see an inbound connection for `ai-assistant` when the agent is running. Also: `ari show apps` lists registered apps.
 
+### CDR CSV “Permission denied” on `Master.csv`
+The compose file mounts `./logs/asterisk/cdr-csv` for CSV call detail records. The Asterisk process in the image often cannot write there (host directory ownership). **`cdr_csv` is disabled in `config/modules.conf`** so logs stay clean. To enable CSV CDR instead: remove `noload => cdr_csv.so`, create `logs/asterisk/cdr-csv` on the host, then `docker exec pbx-gateway id asterisk` (or check the image docs) and `sudo chown` that folder to the same UID/GID.
+
 ### Asterisk logging
 - **RTP packet dumps** (very verbose): `rtp set debug on` — turn off with `rtp set debug off` when done.
 - **Reduce verbosity:** `core set debug 0` (or a lower number like 3) to limit general debug output.
