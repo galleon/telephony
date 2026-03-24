@@ -327,6 +327,16 @@ class ARITransport(BaseTransport):
         finally:
             if self._output_proc:
                 self._output_proc._cancel_pending_stop_buffering()
+                try:
+                    await self._output_proc._flush_ulaw_tail_frame()
+                except Exception:
+                    pass
+                leftover = len(self._output_proc._ulaw_buffer)
+                if leftover:
+                    logger.warning(
+                        f"ARI output: media session ended with {leftover} unsent μ-law bytes "
+                        "(hangup or disconnect before paced playback finished)"
+                    )
                 await self._output_proc.reset_bot_speaking_state()
             if self._input_proc:
                 await self._input_proc.queue_frame(EndFrame())
@@ -482,17 +492,12 @@ class _ARIOutputProcessor(FrameProcessor):
         finally:
             self._stop_buffering_task = None
 
-    async def _send_ulaw(self, ulaw: bytes):
-        """Send ulaw in 160-byte chunks, paced at 20ms (Asterisk telephony)."""
+    async def _drain_ulaw_buffer(self):
+        """Send all full 160-byte μ-law frames from the buffer at 20 ms (8 kHz) pace."""
         if not self._ws or self._ws.state != 1:
             return
-        if not self._prepended_outbound_warmup:
-            self._ulaw_buffer.extend(_ULAW_WARMUP_SILENCE)
-            self._prepended_outbound_warmup = True
-        self._ulaw_buffer.extend(ulaw)
         now = time.monotonic()
         while len(self._ulaw_buffer) >= ULAW_FRAME_SIZE:
-            # Pace sends at 20ms to match Asterisk's expectation
             elapsed = now - self._last_send_time
             if self._last_send_time > 0 and elapsed < ULAW_FRAME_MS / 1000:
                 await asyncio.sleep((ULAW_FRAME_MS / 1000) - elapsed)
@@ -512,6 +517,33 @@ class _ARIOutputProcessor(FrameProcessor):
                 logger.error(f"ARI output send error: {e}")
                 break
 
+    async def _flush_ulaw_tail_frame(self):
+        """Pad a fractional tail to one 20 ms frame so phrase endings are not dropped.
+
+        `_drain_ulaw_buffer` only sends multiples of 160 bytes; without this, the last
+        few samples of each Piper segment could sit in `_ulaw_buffer` until the next
+        utterance or until the WebSocket closes (truncated audio at hangup).
+        """
+        if not self._ws or self._ws.state != 1:
+            return
+        rem = len(self._ulaw_buffer) % ULAW_FRAME_SIZE
+        if rem == 0:
+            return
+        pad_samples = ULAW_FRAME_SIZE - rem
+        silence_pcm = b"\x00\x00" * pad_samples
+        self._ulaw_buffer.extend(audioop.lin2ulaw(silence_pcm, 2))
+        await self._drain_ulaw_buffer()
+
+    async def _send_ulaw(self, ulaw: bytes):
+        """Append μ-law samples and send as many full 20 ms frames as possible."""
+        if not self._ws or self._ws.state != 1:
+            return
+        if not self._prepended_outbound_warmup:
+            self._ulaw_buffer.extend(_ULAW_WARMUP_SILENCE)
+            self._prepended_outbound_warmup = True
+        self._ulaw_buffer.extend(ulaw)
+        await self._drain_ulaw_buffer()
+
     async def process_frame(self, frame, direction):
         # Must call super() first so base handles StartFrame and sets __started=True.
         # Otherwise push_frame rejects all frames via _check_started().
@@ -520,6 +552,7 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
+            await self._flush_ulaw_tail_frame()
             self._cancel_pending_stop_buffering()
             self._stop_buffering_task = asyncio.create_task(self._debounced_stop_media_buffering())
             # Debounce: Piper often sends TTSStopped between sentences in one reply.
