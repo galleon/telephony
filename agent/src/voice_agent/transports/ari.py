@@ -93,7 +93,6 @@ class ARITransport(BaseTransport):
         username: str,
         password: str,
         app_name: str = "ai-assistant",
-        base_url: Optional[str] = None,
         media_host: str = "0.0.0.0",
         media_port: Optional[int] = None,
         params: Optional[TransportParams] = None,
@@ -110,7 +109,6 @@ class ARITransport(BaseTransport):
         self._username = username
         self._password = password
         self._app_name = app_name
-        self._base_url = base_url
         self._media_host = media_host
         self._media_port = media_port or int(os.getenv("ARI_MEDIA_PORT", "8787"))
         self._ari_ws = None
