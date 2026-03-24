@@ -9,7 +9,6 @@
 volumes:
   vllm_cache:
   agent_model_cache:  # Piper models persist across restarts
-  whisper_model_cache:  # whisper.cpp GGML models persist across rebuilds
 
 x-vllm: &vllm
   image: nvcr.io/nvidia/vllm:26.02-py3
@@ -38,13 +37,11 @@ x-vllm: &vllm
 
 services:
   whisper:
+    # Model is baked into the image at build time — no runtime download, instant startup.
+    # To use a different model: docker compose build --build-arg WHISPER_MODEL=tiny.en whisper
     build: ./whisper
     container_name: sentinel-whisper
     restart: unless-stopped
-    environment:
-      - WHISPER_MODEL=${WHISPER_CPP_MODEL:-small.en}
-    volumes:
-      - whisper_model_cache:/models
     ports:
       - "8080:8080"
     deploy:
@@ -54,13 +51,11 @@ services:
             - driver: nvidia
               capabilities: [gpu]
     healthcheck:
-      # whisper-server exposes GET /health → {"status":"ok"}
-      # start_period covers first-start model download (~300 MB, can take several minutes).
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health 2>/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 6
-      start_period: 360s
+      start_period: 15s
     logging:
       driver: "json-file"
       options:

@@ -4,8 +4,9 @@
 # SM targets: 90 = Hopper, 100 = Blackwell (GB10). Compiling both lets the binary
 # run unchanged on any NVIDIA GPU in that range.
 #
-# The model is NOT baked into this image — it is downloaded on first start into the
-# /models volume so it persists across image rebuilds.
+# The model is baked into the image at build time so startup is instant (no
+# first-run download stall that would delay the agent coming up).
+# Override WHISPER_MODEL build arg to bake a different model.
 
 FROM nvcr.io/nvidia/cuda:12.8.0-devel-ubuntu22.04
 
@@ -26,10 +27,17 @@ RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --target whisper-server -j"$(nproc)"
 
-VOLUME ["/models"]
-
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Download the GGML model at image build time → instant startup, no healthcheck delay.
+# Pass --build-arg WHISPER_MODEL=tiny.en (or base.en) to use a smaller/faster model.
+ARG WHISPER_MODEL=small.en
+ENV WHISPER_MODEL=${WHISPER_MODEL}
+RUN wget -q --show-progress \
+        -O "models/ggml-${WHISPER_MODEL}.bin" \
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin"
 
 EXPOSE 8080
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/bin/sh", "-c", \
+     "exec /whisper/build/bin/whisper-server \
+        --host 0.0.0.0 --port 8080 \
+        -m /whisper/models/ggml-${WHISPER_MODEL}.bin \
+        --threads 4 --processors 2"]
