@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from loguru import logger
 from pipecat.services.openai.llm import OpenAILLMService
@@ -74,7 +75,11 @@ def create_ai_services():
     llm.register_function("transfer_to_support", transfer_to_human)
 
     # 4. TTS: Local Piper (CUDA on DGX Spark)
+    # Persist Piper voice in cache dir (mounted volume in Docker)
+    piper_cache = Path(os.getenv("PIPER_CACHE_DIR", "/app/.cache/piper"))
+    piper_cache.mkdir(parents=True, exist_ok=True)
     tts = PiperTTSService(
+        download_dir=piper_cache,
         use_cuda=os.getenv("PIPER_USE_CUDA", "true").lower() == "true",
         settings=PiperTTSService.Settings(
             voice=os.getenv("PIPER_VOICE", "en_US-ryan-high"),

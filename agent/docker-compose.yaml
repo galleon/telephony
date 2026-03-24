@@ -8,6 +8,7 @@
 
 volumes:
   vllm_cache:
+  agent_model_cache:  # Whisper + Piper models persist across restarts
 
 x-vllm: &vllm
   image: nvcr.io/nvidia/vllm:26.02-py3
@@ -71,6 +72,10 @@ services:
     environment:
       - VLLM_BASE_URL=http://vllm:8000/v1
       - LLM_MODEL=Qwen2.5-7B-Instruct
+      - HF_HOME=/app/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/app/.cache/huggingface
+    volumes:
+      - agent_model_cache:/app/.cache
     ports:
       - "8787:8787"
     # Optional: uncomment for GPU-accelerated Whisper/Piper
