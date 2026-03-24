@@ -1,3 +1,5 @@
+import os
+
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -46,7 +48,11 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
     vad = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(
             sample_rate=_PIPELINE_INPUT_HZ,
-            params=VADParams(stop_secs=0.35),
+            params=VADParams(
+                stop_secs=float(os.getenv("VAD_STOP_SECS", "0.35")),
+                min_volume=float(os.getenv("VAD_MIN_VOLUME", "0.6")),
+                confidence=float(os.getenv("VAD_CONFIDENCE", "0.7")),
+            ),
         )
     )
 

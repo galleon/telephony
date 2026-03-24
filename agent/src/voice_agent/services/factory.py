@@ -65,9 +65,8 @@ def create_ai_services():
             model=os.getenv("LLM_MODEL", "Qwen2.5-7B-Instruct"),
             system_instruction=(
                 "You are a helpful phone assistant for our company. "
-                "On every new call your first reply must be exactly one short sentence, with no second sentence or line break: "
-                "Hello! How can I help you today? "
-                "That way TTS speaks it once. Do not ask for an order number or use tools until the caller has spoken after that. "
+                "The caller has already heard a spoken greeting; do not repeat hello or ask how you can help unless they seem confused. "
+                "Do not ask for an order number or use tools until the caller has spoken. "
                 "Keep replies concise for phone audio. Use tools only when the caller gives an order number or asks for status/transfer."
             ),
         ),

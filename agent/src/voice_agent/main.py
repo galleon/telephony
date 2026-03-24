@@ -15,9 +15,13 @@ _cache.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("HF_HOME", str(_cache))
 os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_cache))
 
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import TTSSpeakFrame
 
 from .pipeline import configure_bot
+
+# Spoken once per call via TTS (not LLM) so Piper runs a single clip and context stays one assistant turn.
+_DEFAULT_GREETING = "Hello! How can I help you today?"
+
 
 async def start_agent():
     # Load settings from .env (agent runs on DGX; ASTERISK_IP = host running Asterisk)
@@ -45,9 +49,11 @@ async def start_agent():
         logger.info("📞 CALL CONNECTED: DGX Spark Blackwell cores engaged.")
         # Fresh call: clear history so the model greets instead of continuing a prior turn
         llm_context.set_messages([])
+        greeting = (os.getenv("CALL_GREETING") or _DEFAULT_GREETING).strip() or _DEFAULT_GREETING
         # Brief pause so SIP/RTP bridge is ready before TTS (reduces clipped first syllable)
         await asyncio.sleep(0.35)
-        await trans.queue_frame(LLMRunFrame())
+        # One Piper utterance + one assistant context message (LLM first reply was often split into two sentences)
+        await trans.queue_frame(TTSSpeakFrame(text=greeting, append_to_context=True))
 
     async def run_transport():
         try:
