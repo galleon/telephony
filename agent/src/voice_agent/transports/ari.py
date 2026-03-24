@@ -512,8 +512,10 @@ class _ARIOutputProcessor(FrameProcessor):
         self._bytes_sent = 0
         self._frames_received = 0
         self._buffering_started = False
-        # SOXR resampler: one per media call only (reset on new WebSocket). Resetting per TTS phrase
-        # re-primes the filter and clips the start of each short utterance (e.g. "Hello!" -> "lo").
+        # SOXR resampler: reset on each TTSStopped phrase so the filter delay is flushed (not
+        # discarded). Pipecat auto-clears the stream after 0.2 s of inactivity via
+        # _soxr_stream.clear(), which discards buffered tail samples — causing the last ~5-30 ms of
+        # each phrase to be silently dropped. We flush explicitly instead (see _flush_pcm_resampler).
         self._pcm_resampler = create_stream_resampler()
         self._prepended_outbound_warmup = False
         self._stop_buffering_task: asyncio.Task | None = None
@@ -555,6 +557,29 @@ class _ARIOutputProcessor(FrameProcessor):
             pass
         finally:
             self._bot_stop_task = None
+
+    async def _flush_pcm_resampler(self) -> bytes:
+        """Flush the SOXR filter delay so phrase-ending samples are not lost.
+
+        The SOXRStreamAudioResampler holds ~half-filter-length samples inside its
+        ResampleStream. If we don't drain them, pipecat's 0.2 s auto-clear discards
+        them silently, clipping the last few milliseconds of every spoken phrase.
+
+        Push a short silence block through the resampler to force the held samples
+        out, then reset the resampler so the next phrase starts with a clean filter.
+        The silence also pads any sub-frame tail to a clean sample boundary.
+        """
+        # 30 ms at 16 kHz (480 samples) is well above any SOXR HQ filter delay.
+        silence = b"\x00\x00" * 480
+        try:
+            tail_pcm = await self._pcm_resampler.resample(silence, PIPELINE_SAMPLE_RATE, ULAW_SAMPLE_RATE)
+        except Exception as exc:
+            logger.debug(f"ARI output: resampler flush failed: {exc}")
+            tail_pcm = b""
+        finally:
+            # Fresh filter for the next phrase; avoids stale state between sentences.
+            self._pcm_resampler = create_stream_resampler()
+        return tail_pcm
 
     def _cancel_pending_stop_buffering(self):
         t = self._stop_buffering_task
@@ -643,6 +668,10 @@ class _ARIOutputProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return []
         if isinstance(frame, TTSStoppedFrame):
+            # Drain SOXR filter delay first, then pad the µ-law tail frame.
+            tail_pcm = await self._flush_pcm_resampler()
+            if tail_pcm:
+                await self._send_ulaw(_lin2ulaw(tail_pcm))
             await self._flush_ulaw_tail_frame()
             self._cancel_pending_stop_buffering()
             self._stop_buffering_task = asyncio.create_task(self._debounced_stop_media_buffering())
