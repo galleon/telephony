@@ -138,7 +138,9 @@ class ARITransport(BaseTransport):
         ch = msg.get("channel", {})
         dialplan = ch.get("dialplan", {})
         app_data = dialplan.get("app_data", "") or ""
-        if "incoming" not in app_data and "websocket" not in app_data:
+        # External media channel has empty app_data; match by ch["id"] in sessions (our ws_channel)
+        is_external_media = ch["id"] in self._sessions and self._sessions.get(ch["id"], {}).get("ws_channel") == ch["id"]
+        if "incoming" not in app_data and "websocket" not in app_data and not is_external_media:
             return
         incoming_id = ch["id"]
         incoming_name = ch.get("name", "")
