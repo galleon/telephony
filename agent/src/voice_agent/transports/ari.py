@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -266,6 +267,8 @@ class ARITransport(BaseTransport):
         logger.info(f"Media WebSocket connected from {ws.remote_address}")
         if self._output_proc:
             self._output_proc._ws = ws
+            self._output_proc._buffering_started = False
+            self._output_proc._frames_received = 0
         # Bridge is created on Dial ANSWER (_on_dial) per asterisk-websocket-examples
         # Pipeline expects StartFrame before any other frames (LLMRunFrame, audio, etc.)
         if self._input_proc:
@@ -368,6 +371,7 @@ class _ARIOutputProcessor(FrameProcessor):
         self._last_send_time = 0.0
         self._bytes_sent = 0
         self._frames_received = 0
+        self._buffering_started = False
 
     def set_client_connection(self, ws):
         self._ws = ws
@@ -406,6 +410,15 @@ class _ARIOutputProcessor(FrameProcessor):
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
             return []
+        if isinstance(frame, TTSStoppedFrame):
+            if self._buffering_started and self._ws and self._ws.state == 1:
+                try:
+                    await self._ws.send("STOP_MEDIA_BUFFERING")
+                    self._buffering_started = False
+                except (ConnectionClosed, Exception):
+                    pass
+            await self.push_frame(frame, direction)
+            return []
         if not isinstance(frame, OutputAudioRawFrame):
             await self.push_frame(frame, direction)
             return []
@@ -421,6 +434,12 @@ class _ARIOutputProcessor(FrameProcessor):
         self._frames_received += 1
         if self._frames_received == 1:
             logger.info(f"ARI output: first OutputAudioRawFrame received (size={len(frame.audio)} bytes, sr={getattr(frame, 'sample_rate', '?')})")
+        if not self._buffering_started and self._ws and self._ws.state == 1:
+            try:
+                await self._ws.send("START_MEDIA_BUFFERING")
+                self._buffering_started = True
+            except (ConnectionClosed, Exception):
+                pass
         try:
             pcm = frame.audio
             sr = getattr(frame, "sample_rate", None) or PIPELINE_SAMPLE_RATE
