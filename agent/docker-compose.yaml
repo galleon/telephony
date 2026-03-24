@@ -4,7 +4,7 @@
 # Usage:
 #   cd agent && docker compose up -d
 #
-# Asterisk (Mac or Linux) must be running first. Start order: 1) Asterisk, 2) this compose.
+# Asterisk (Linux Docker on your PBX host) must be running first. Start order: 1) Asterisk, 2) this compose.
 
 volumes:
   vllm_cache:

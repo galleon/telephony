@@ -3,18 +3,21 @@
 If you have no sound on calls, this test checks whether the Asterisk ↔ WebSocket ↔ audio path works. If the echo test plays audio, the issue is in our agent. If not, it's Asterisk config, RTP, or the phone.
 
 ## Prerequisites
-- Asterisk running on Mac
-- DGX Spark reachable from Mac (e.g. 192.168.1.72)
+
+- Asterisk running on the **Linux host** (Docker, e.g. `pbx-gateway`)
+- DGX Spark reachable from that host (e.g. `192.168.1.72`)
 
 ## Step 1: Stop the agent
+
 ```bash
 cd agent && docker compose stop agent
 ```
+
 This frees port 8787 on the DGX for the echo server.
 
 ## Step 2: Clone and run the echo server on the DGX
 
-On the **DGX Spark** (not the Mac):
+On the **DGX Spark**:
 
 ```bash
 cd ~
@@ -23,19 +26,21 @@ cd asterisk-websocket-examples
 pip install websockets
 ```
 
-Edit `mow_echo_test_server.py` line 130: change `"localhost"` to `"0.0.0.0"` so Asterisk (on the Mac) can connect:
+Edit `mow_echo_test_server.py` line 130: change `"localhost"` to `"0.0.0.0"` so Asterisk (on the **Linux Asterisk host**) can connect:
 
 ```python
 async with serve(process_media, "0.0.0.0", 8787, subprotocols=["media"],
 ```
 
 Run it:
+
 ```bash
 python mow_echo_test_server.py
 ```
+
 Leave it running. It will play `test.ulaw` to any caller who connects.
 
-## Step 3: Add echo test config on the Mac
+## Step 3: Add echo test config on the Asterisk host
 
 Edit `config/websocket_client.conf` – add a new section (or temporarily replace `media_connection1`):
 
@@ -68,7 +73,7 @@ exten => 601,1,NoOp(Echo test - WebSocket)
 
 ## Step 5: Reload Asterisk
 
-From the **Mac** (where Asterisk runs):
+On the **Linux host** where Asterisk runs:
 
 ```bash
 docker exec pbx-gateway asterisk -rx "core reload"
@@ -78,7 +83,7 @@ If Asterisk runs in a different container, use its name instead of `pbx-gateway`
 
 ## Step 6: Call extension 601
 
-From Linphone/Zoiper, dial **601**. You should hear the test.ulaw audio (a short test clip).
+From **Telephone** on your Mac (or Linphone, Zoiper), dial **601**. You should hear the test.ulaw audio (a short test clip).
 
 - **If you hear it:** Asterisk ↔ WebSocket ↔ audio works. The problem is in the Sentinel agent (bridge logic, frame handling, etc.).
 - **If you don’t:** Check firewall (port 8787 on DGX), RTP ports (10000–10100), NAT, and phone registration.

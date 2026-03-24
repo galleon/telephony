@@ -78,17 +78,19 @@ def configure_bot(asterisk_ip: str, ari_user: str, ari_pass: str):
 
     # 4. The Pipeline Definition
     # Flow: Audio In -> STT mute (during bot speech) -> VAD -> STT -> User Agg -> LLM -> TTS -> Output -> Assistant Agg
-    pipeline = Pipeline([
-        transport.input(),
-        stt_mute,
-        vad,
-        stt,
-        _SttTranscriptionLogger(),
-        user_aggregator,
-        llm,
-        tts,
-        transport.output(),
-        assistant_aggregator,
-    ])
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt_mute,
+            vad,
+            stt,
+            _SttTranscriptionLogger(),
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
 
     return pipeline, transport, context

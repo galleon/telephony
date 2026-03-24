@@ -2,7 +2,7 @@ services:
   asterisk:
     image: andrius/asterisk:latest
     container_name: pbx-gateway
-    # Map ports explicitly for Mac
+    # SIP, ARI HTTP, RTP range for LAN phones
     ports:
       - "5060:5060/udp"
       - "8088:8088"

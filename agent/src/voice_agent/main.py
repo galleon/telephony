@@ -3,8 +3,8 @@ import os
 import signal
 from pathlib import Path
 
-from loguru import logger
 from dotenv import load_dotenv
+from loguru import logger
 
 load_dotenv()
 
@@ -63,16 +63,16 @@ async def start_agent():
             raise
 
     transport_task = asyncio.create_task(run_transport())
-    pipeline_task = asyncio.create_task(
-        PipelineRunner(handle_sigint=False, handle_sigterm=False).run(pipecat_task)
-    )
+    pipeline_task = asyncio.create_task(PipelineRunner(handle_sigint=False, handle_sigterm=False).run(pipecat_task))
     tasks = [transport_task, pipeline_task]
 
     loop = asyncio.get_running_loop()
     try:
+
         def on_signal():
             for t in tasks:
                 t.cancel()
+
         loop.add_signal_handler(signal.SIGINT, on_signal)
         loop.add_signal_handler(signal.SIGTERM, on_signal)
     except NotImplementedError:
@@ -94,6 +94,7 @@ async def start_agent():
         except asyncio.CancelledError:
             pass
     logger.info("Agent shut down.")
+
 
 if __name__ == "__main__":
     asyncio.run(start_agent())

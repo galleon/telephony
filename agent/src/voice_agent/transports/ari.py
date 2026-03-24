@@ -11,12 +11,10 @@ based on asterisk-websocket-examples.
 
 import asyncio
 import audioop
-import time
 import json
-import logging
 import os
+import time
 import uuid
-from typing import Optional
 
 from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
@@ -35,12 +33,9 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 try:
     from websockets.asyncio.client import connect as ws_connect
     from websockets.asyncio.server import serve as ws_serve
-    from websockets.asyncio.server import basic_auth
     from websockets.exceptions import ConnectionClosed
 except ImportError:
-    raise ImportError(
-        "ARI transport requires websockets. Install with: pip install 'pipecat-ai[websocket]'"
-    )
+    raise ImportError("ARI transport requires websockets. Install with: pip install 'pipecat-ai[websocket]'")
 
 # Asterisk sends 8kHz µlaw; Pipecat/Whisper expects 16kHz PCM
 ULAW_SAMPLE_RATE = 8000
@@ -85,7 +80,7 @@ class ARITransport(BaseTransport):
     """
     Transport that connects to Asterisk ARI and runs a Media WebSocket server.
 
-    Asterisk (on Mac) connects to the Media server on the DGX when a call enters
+    Asterisk connects from your PBX host to the Media server on the DGX when a call enters
     Stasis. Asterisk uses websocket_client.conf: set [media_connection1] uri to
     ws://DGX_IP:8787/media. external_host must be the section name, not an IP.
     """
@@ -97,8 +92,8 @@ class ARITransport(BaseTransport):
         password: str,
         app_name: str = "ai-assistant",
         media_host: str = "0.0.0.0",
-        media_port: Optional[int] = None,
-        params: Optional[TransportParams] = None,
+        media_port: int | None = None,
+        params: TransportParams | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -125,6 +120,7 @@ class ARITransport(BaseTransport):
         def decorator(fn):
             self._handlers[event] = fn
             return fn
+
         return decorator
 
     async def _handle_ari_event(self, msg):
@@ -143,7 +139,8 @@ class ARITransport(BaseTransport):
         dialplan = ch.get("dialplan", {})
         app_data = dialplan.get("app_data", "") or ""
         # External media channel has empty app_data; match by ch["id"] in sessions (our ws_channel)
-        is_external_media = ch["id"] in self._sessions and self._sessions.get(ch["id"], {}).get("ws_channel") == ch["id"]
+        sid = ch["id"]
+        is_external_media = sid in self._sessions and self._sessions.get(sid, {}).get("ws_channel") == sid
         if "incoming" not in app_data and "websocket" not in app_data and not is_external_media:
             return
         incoming_id = ch["id"]
@@ -165,15 +162,19 @@ class ARITransport(BaseTransport):
                 )
                 external_host = "media_connection1"
             logger.info(f"Creating WebSocket channel for {incoming_name} (external_host={external_host})")
-            await self._ari_send_request("POST", "channels/externalMedia", query_strings=[
-                {"name": "channelId", "value": ws_channel},
-                {"name": "app", "value": msg.get("application", self._app_name)},
-                {"name": "data", "value": "websocket"},
-                {"name": "external_host", "value": external_host},
-                {"name": "transport", "value": "websocket"},
-                {"name": "encapsulation", "value": "none"},
-                {"name": "format", "value": "ulaw"},
-            ])
+            await self._ari_send_request(
+                "POST",
+                "channels/externalMedia",
+                query_strings=[
+                    {"name": "channelId", "value": ws_channel},
+                    {"name": "app", "value": msg.get("application", self._app_name)},
+                    {"name": "data", "value": "websocket"},
+                    {"name": "external_host", "value": external_host},
+                    {"name": "transport", "value": "websocket"},
+                    {"name": "encapsulation", "value": "none"},
+                    {"name": "format", "value": "ulaw"},
+                ],
+            )
         else:
             # External media channel: StasisStart for channel we created (id == ws_channel).
             # Asterisk may not set app_data for externally created channels.
@@ -209,12 +210,17 @@ class ARITransport(BaseTransport):
         pass
 
     async def _create_bridge_and_answer(self, sess):
-        """Create mixing bridge and add channels. Order per asterisk-websocket-examples: bridge, add both, then answer."""
+        """Create mixing bridge and add channels.
+
+        Order per asterisk-websocket-examples: bridge, add both, then answer.
+        """
         if sess.get("bridge_id"):
             return  # Already bridged
         bridge_id = str(uuid.uuid4())
         sess["bridge_id"] = bridge_id
-        logger.info(f"Creating bridge {bridge_id} for {sess.get('incoming_name', '?')} <-> {sess.get('ws_channel_name', '?')}")
+        in_name = sess.get("incoming_name", "?")
+        ws_name = sess.get("ws_channel_name", "?")
+        logger.info(f"Creating bridge {bridge_id} for {in_name} <-> {ws_name}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}?type=mixing")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['incoming']}")
         await self._ari_send_request("POST", f"bridges/{bridge_id}/addChannel?channel={sess['ws_channel']}")
@@ -227,7 +233,7 @@ class ARITransport(BaseTransport):
         if msg.get("dialstatus") == "ANSWER":
             sess = self._sessions.get(msg["peer"]["id"])
             if sess:
-                logger.info(f"Dial ANSWER for WebSocket channel, creating bridge")
+                logger.info("Dial ANSWER for WebSocket channel, creating bridge")
                 await self._create_bridge_and_answer(sess)
 
     async def _ari_send_request(self, method: str, uri: str, query_strings=None):
@@ -241,7 +247,10 @@ class ARITransport(BaseTransport):
         await self._ari_ws.send(json.dumps(req))
 
     async def _run_ari_client(self):
-        ari_url = f"{self._uri.rstrip('/')}/ari/events?subscribeAll=false&app={self._app_name}&api_key={self._username}:{self._password}"
+        base = self._uri.rstrip("/")
+        app = self._app_name
+        key = f"{self._username}:{self._password}"
+        ari_url = f"{base}/ari/events?subscribeAll=false&app={app}&api_key={key}"
         backoff = 5.0
         while True:
             try:
@@ -301,25 +310,18 @@ class ARITransport(BaseTransport):
         if "on_client_connected" in self._handlers:
             await self._handlers["on_client_connected"](self, ws)
         try:
-            optimal_frame_size = 160
             in_resampler = create_stream_resampler()
             async for message in ws:
                 if isinstance(message, str):
-                    if "MEDIA_START" in message:
-                        for p in message.split()[1:]:
-                            kv = p.split(":")
-                            if kv[0] == "optimal_frame_size":
-                                optimal_frame_size = int(kv[1])
-                    elif "MEDIA_XOFF" in message or "MEDIA_XON" in message:
+                    # MEDIA_START / flow-control text frames; audio is binary only below
+                    if "MEDIA_XOFF" in message or "MEDIA_XON" in message:
                         continue
                     continue
                 if self._input_proc:
                     in_chunks += 1
                     pcm = audioop.ulaw2lin(message, 2)
                     if PIPELINE_SAMPLE_RATE != ULAW_SAMPLE_RATE:
-                        pcm = await in_resampler.resample(
-                            pcm, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE
-                        )
+                        pcm = await in_resampler.resample(pcm, ULAW_SAMPLE_RATE, PIPELINE_SAMPLE_RATE)
                     frame = InputAudioRawFrame(audio=pcm, sample_rate=PIPELINE_SAMPLE_RATE, num_channels=1)
                     await self._input_proc.queue_frame(frame)
         except Exception as e:
@@ -358,6 +360,7 @@ class ARITransport(BaseTransport):
     async def _media_server(self):
         async def handler(ws):
             await self._process_media(ws)
+
         logger.info(f"Starting Media server on {self._media_host}:{self._media_port}")
         async with ws_serve(handler, self._media_host, self._media_port, subprotocols=["media"]) as server:
             await server.wait_closed()
@@ -368,7 +371,6 @@ class ARITransport(BaseTransport):
             await self._input_proc.queue_frame(frame)
 
     def input(self):
-        from pipecat.transports.base_input import BaseInputTransport
         self._input_proc = _ARIInputProcessor(self, self.params)
         return self._input_proc
 
@@ -429,11 +431,11 @@ class _ARIOutputProcessor(FrameProcessor):
         # re-primes the filter and clips the start of each short utterance (e.g. "Hello!" -> "lo").
         self._pcm_resampler = create_stream_resampler()
         self._prepended_outbound_warmup = False
-        self._stop_buffering_task: Optional[asyncio.Task] = None
+        self._stop_buffering_task: asyncio.Task | None = None
         # Pipecat BaseOutputTransport emits these; we need them for STTMuteFilter / user mute
         # so phone echo during TTS is not treated as the caller speaking.
         self._bot_out_active = False
-        self._bot_stop_task: Optional[asyncio.Task] = None
+        self._bot_stop_task: asyncio.Task | None = None
 
     def _cancel_bot_stop_task(self):
         t = self._bot_stop_task
@@ -577,7 +579,9 @@ class _ARIOutputProcessor(FrameProcessor):
         self._cancel_pending_stop_buffering()
         self._frames_received += 1
         if self._frames_received == 1:
-            logger.info(f"ARI output: first OutputAudioRawFrame received (size={len(frame.audio)} bytes, sr={getattr(frame, 'sample_rate', '?')})")
+            nbytes = len(frame.audio)
+            sr = getattr(frame, "sample_rate", "?")
+            logger.info(f"ARI output: first OutputAudioRawFrame received (size={nbytes} bytes, sr={sr})")
         if not self._buffering_started and self._ws and self._ws.state == 1:
             try:
                 await self._ws.send("START_MEDIA_BUFFERING")

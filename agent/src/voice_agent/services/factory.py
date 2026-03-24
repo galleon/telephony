@@ -2,11 +2,12 @@ import os
 from pathlib import Path
 
 from loguru import logger
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.whisper.stt import WhisperSTTService
-from pipecat.services.piper.tts import PiperTTSService
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.piper.tts import PiperTTSService
+from pipecat.services.whisper.stt import WhisperSTTService
+
 from ..tools.handlers import fetch_order_status, transfer_to_human
 
 
@@ -42,18 +43,14 @@ def create_ai_services():
     order_tool = FunctionSchema(
         name="get_order_status",
         description="Get the shipping status and delivery date for a specific order ID.",
-        properties={
-            "order_id": {"type": "string", "description": "The 6-digit order number (e.g. 123456)"}
-        },
+        properties={"order_id": {"type": "string", "description": "The 6-digit order number (e.g. 123456)"}},
         required=["order_id"],
     )
 
     transfer_tool = FunctionSchema(
         name="transfer_to_support",
         description="Transfer the caller to a human support agent if you cannot help them.",
-        properties={
-            "reason": {"type": "string", "description": "Short summary of why the user needs a human"}
-        },
+        properties={"reason": {"type": "string", "description": "Short summary of why the user needs a human"}},
         required=[],  # reason is optional
     )
 
@@ -65,9 +62,11 @@ def create_ai_services():
             model=os.getenv("LLM_MODEL", "Qwen2.5-7B-Instruct"),
             system_instruction=(
                 "You are a helpful phone assistant for our company. "
-                "The caller has already heard a spoken greeting; do not repeat hello or ask how you can help unless they seem confused. "
+                "The caller has already heard a spoken greeting; "
+                "do not repeat hello or ask how you can help unless they seem confused. "
                 "Do not ask for an order number or use tools until the caller has spoken. "
-                "Keep replies concise for phone audio. Use tools only when the caller gives an order number or asks for status/transfer."
+                "Keep replies concise for phone audio. "
+                "Use tools only when the caller gives an order number or asks for status/transfer."
             ),
         ),
     )

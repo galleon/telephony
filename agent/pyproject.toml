@@ -9,3 +9,21 @@ dependencies = [
     "pipecat-ai[openai,piper,whisper,websocket]>=0.0.106",
     "python-dotenv>=1.2.2",
 ]
+
+[dependency-groups]
+dev = ["ruff>=0.9"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["src", "."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Imports follow load_dotenv() and HF cache env setup.
+"src/voice_agent/main.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
