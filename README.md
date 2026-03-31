@@ -1,4 +1,4 @@
-# 🎙️ Sentinel-Voice: On-Premise Multimodal AI Telephony
+# 🎙️ On-Premise Multimodal AI Telephony
 
 A high-performance, private AI voice agent bridging **Asterisk IP Telephony** with **NVIDIA DGX Spark** inference. This system enables real-time, low-latency conversational AI with full tool-calling capabilities, running entirely on your local hardware.
 
